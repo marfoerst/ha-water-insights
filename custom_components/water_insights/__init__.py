@@ -52,3 +52,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: WaterInsightsConfigEntr
         if not others:
             async_unregister_panel(hass)
     return ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: WaterInsightsConfigEntry) -> None:
+    """Delete stored draws and model when the entry is removed."""
+    from homeassistant.helpers.storage import Store  # noqa: PLC0415
+
+    await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_remove()

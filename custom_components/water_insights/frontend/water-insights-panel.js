@@ -17,6 +17,8 @@ const I18N = {
     imported: "Imported", noEntries: "No water sensor set up. Add the Water Insights integration first.",
     honest: "Measured on the newest draws the model has not seen during training.",
     unfamiliar: "Unfamiliar pattern – no suggestion",
+    invalid: "Please fill in all fields with valid values.",
+    tooLarge: "File too large for the browser upload. Copy it to /media and call the service water_insights.import_events with path.",
   },
   de: {
     title: "Water Insights", classify: "Einordnen", usage: "Verbrauch", model: "Modell", settings: "Einstellungen",
@@ -35,6 +37,8 @@ const I18N = {
     imported: "Importiert", noEntries: "Kein Wassersensor eingerichtet. Bitte zuerst die Integration Water Insights hinzufügen.",
     honest: "Gemessen an den neuesten Entnahmen, die das Modell beim Training nicht gesehen hat.",
     unfamiliar: "Unbekanntes Muster – kein Vorschlag",
+    invalid: "Bitte alle Felder mit gültigen Werten ausfüllen.",
+    tooLarge: "Datei zu groß für den Upload im Browser. Nach /media kopieren und die Aktion water_insights.import_events mit path aufrufen.",
   },
 };
 
@@ -258,10 +262,10 @@ class WaterInsightsPanel extends HTMLElement {
     const s = this.entry.settings;
     return `<div class="card form">
       <label>${t.categoriesHint}<textarea id="s_categories" rows="7">${esc((s.categories || []).join("\n"))}</textarea></label>
-      <label>${t.startFlow}<input id="s_start_flow" type="number" step="0.1" min="0.1" value="${s.start_flow}"></label>
-      <label>${t.endQuiet}<input id="s_end_quiet_s" type="number" step="1" min="5" value="${s.end_quiet_s}"></label>
-      <label>${t.minVolume}<input id="s_min_volume_l" type="number" step="0.1" min="0.1" value="${s.min_volume_l}"></label>
-      <label>${t.confThreshold}<input id="s_conf_threshold" type="number" step="0.01" min="0.5" max="0.99" value="${s.conf_threshold}"></label>
+      <label>${t.startFlow}<input id="s_start_flow" type="number" step="0.1" min="0.1" max="20" required value="${s.start_flow}"></label>
+      <label>${t.endQuiet}<input id="s_end_quiet_s" type="number" step="1" min="5" max="600" required value="${s.end_quiet_s}"></label>
+      <label>${t.minVolume}<input id="s_min_volume_l" type="number" step="0.1" min="0.1" max="100" required value="${s.min_volume_l}"></label>
+      <label>${t.confThreshold}<input id="s_conf_threshold" type="number" step="0.01" min="0.5" max="0.99" required value="${s.conf_threshold}"></label>
       <label>${t.helpers}<textarea id="s_helper_entities" rows="3">${esc((s.helper_entities || []).join("\n"))}</textarea></label>
       <button id="save" ${this._busy ? "disabled" : ""}>${t.save}</button>
     </div>
@@ -298,6 +302,16 @@ class WaterInsightsPanel extends HTMLElement {
     root.getElementById("save")?.addEventListener("click", async () => {
       const v = (id) => root.getElementById(id).value;
       const lines = (id) => v(id).split("\n").map((x) => x.trim()).filter(Boolean);
+      const nums = ["s_start_flow", "s_end_quiet_s", "s_min_volume_l", "s_conf_threshold"];
+      const bad = nums.find((id) => {
+        const el = root.getElementById(id);
+        return el.value.trim() === "" || !el.checkValidity();
+      });
+      if (bad || !lines("s_categories").length) {
+        this._msg = this.t.invalid;
+        this._render();
+        return;
+      }
       const res = await this._ws({
         type: "water_insights/update_settings",
         settings: {
@@ -329,6 +343,11 @@ class WaterInsightsPanel extends HTMLElement {
     root.getElementById("import")?.addEventListener("change", async (ev) => {
       const file = ev.target.files[0];
       if (!file) return;
+      if (file.size > 3500000) {
+        this._msg = this.t.tooLarge;
+        this._render();
+        return;
+      }
       const text = await file.text();
       try {
         const r = await this._hass.callWS({

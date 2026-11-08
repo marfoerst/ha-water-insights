@@ -99,3 +99,16 @@ def test_implausible_flow_treated_as_gap():
     det, ev = run_flow([(30, 0.0), (10, 500.0), (60, 0.0)])
     assert ev == []
     assert det.integral_l < 0.1
+
+
+def test_stale_flow_sensor_no_phantom_volume():
+    det = EventDetector(DetectorConfig(), "flow")
+    det.feed(T0, 0.0)
+    det.feed(T0 + 10, 8.0)  # then the sensor silently stops reporting
+    ev = []
+    for i in range(1, 24 * 360):  # 24 h of ticks every 10 s
+        ev += det.tick(T0 + 10 + i * 10)
+    assert len(ev) == 1
+    assert det.integral_l < 8.0 * 15 + 1  # at most the stale window
+    assert not det.active
+    assert len(ev[0].samples) <= 400

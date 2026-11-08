@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Domain `water_insights`; repo `marfoerst/ha-water-insights`; MIT license; translations `de` + `en`.
-- `manifest.json` `requirements: []` — only numpy/stdlib (numpy ships with HA core). No scikit-learn/scipy/torch.
+- `manifest.json` `requirements: ["numpy>=1.26.0"]` — numpy/stdlib only (numpy is not part of HA core; see spec §12). No scikit-learn/scipy/torch.
 - Defaults: start threshold **1.0 L/min**, end after **60 s** below threshold, minimum volume **2.0 L**, confidence threshold **0.8**, min labeled events per category **10**, min test precision for auto-classification **0.9**.
 - Default categories (editable): Dusche, Toilette, Waschmaschine, Spülmaschine, Wasserhahn, Garten. Built-in, non-removable: `mixed` ("Gemischt"). Built-in sensors: Nicht eingeordnet, Gemischt, Kleinmengen.
 - Category sensors: unit `L`, `device_class: water`, **`state_class: total`** (never `total_increasing`).

@@ -18,6 +18,7 @@ ATTR_ENTRY = "config_entry_id"
 ATTR_EVENT = "event_id"
 ATTR_CATEGORY = "category"
 ATTR_DATA = "data"
+ATTR_PATH = "path"
 
 
 def managers(hass: HomeAssistant) -> list[WaterInsightsManager]:
@@ -61,6 +62,11 @@ def train_summary(result) -> dict:
     }
 
 
+def _read_text(path: str) -> str:
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register services."""
@@ -81,7 +87,25 @@ def async_setup_services(hass: HomeAssistant) -> None:
         return resolve(hass, call.data.get(ATTR_ENTRY)).export()
 
     async def import_(call: ServiceCall) -> ServiceResponse:
-        n = resolve(hass, call.data.get(ATTR_ENTRY)).async_import(call.data[ATTR_DATA])
+        data = call.data.get(ATTR_DATA)
+        if (path := call.data.get(ATTR_PATH)) is not None:
+            if not hass.config.is_allowed_path(path):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="path_not_allowed",
+                    translation_placeholders={"path": path},
+                )
+            try:
+                data = await hass.async_add_executor_job(_read_text, path)
+            except OSError as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="path_not_readable",
+                    translation_placeholders={"path": path},
+                ) from err
+        if data is None:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="data_required")
+        n = await resolve(hass, call.data.get(ATTR_ENTRY)).async_import(data)
         return {"imported": n}
 
     entry = vol.Optional(ATTR_ENTRY)
@@ -104,6 +128,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
         DOMAIN,
         "import_events",
         import_,
-        vol.Schema({entry: cv.string, vol.Required(ATTR_DATA): vol.Any(cv.string, dict)}),
+        vol.Schema(
+            {
+                entry: cv.string,
+                vol.Exclusive(ATTR_DATA, "source"): vol.Any(cv.string, dict),
+                vol.Exclusive(ATTR_PATH, "source"): cv.string,
+            }
+        ),
         supports_response=SupportsResponse.OPTIONAL,
     )

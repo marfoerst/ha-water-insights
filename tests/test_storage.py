@@ -74,3 +74,31 @@ def test_import_marks_model_stale():
     s = State(model={"type": "softmax"})
     import_events(s, LEGACY)
     assert s.model_stale
+
+
+def test_import_never_overwrites_or_books():
+    s = State()
+    live = _ev("20261107T201500", "Wasserhahn", "user")
+    live.volume_l, live.booked = 99.0, True
+    s.events[live.id] = live
+    import_events(s, LEGACY)
+    e = s.events["20261107T201500"]
+    assert e.label == "Wasserhahn" and e.volume_l == 99.0 and e.booked
+    assert s.events["20261107T210000"].booked is False
+
+
+def test_import_adopts_user_label_for_unlabeled():
+    s = State()
+    old = _ev("20261107T201500")
+    s.events[old.id] = old
+    import_events(s, LEGACY)
+    assert s.events[old.id].label == "Toilette" and s.events[old.id].label_source == "user"
+
+
+def test_reserved_and_colliding_categories():
+    from custom_components.water_insights.config_flow import clean_categories
+
+    assert clean_categories(["Spülmaschine", "Spulmaschine", "small", "Mixed", " Dusche "]) == [
+        "Spülmaschine",
+        "Dusche",
+    ]

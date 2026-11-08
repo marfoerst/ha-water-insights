@@ -138,3 +138,13 @@ Hintergrund: Martin hat das heute als Bündel aus Automationen, Helfern und eine
 - Martin ersetzt sein eigenes Automationsbündel durch die Integration.
 - Auf Martins Daten (Aquaro, Hilfssensor Waschmaschine) nach ~2 Wochen Einordnen: ehrliche Genauigkeit pro Kategorie sichtbar; die Hauptkategorien (Dusche, Toilette, Waschmaschine) werden mit hoher Sicherheit getroffen, schwierige (Wasserhahn, Gemischt) bleiben eher offen statt falsch.
 - Ein fremder Nutzer kann die Integration über HACS installieren und ohne Doku-Studium bis zum ersten Einordnen kommen.
+
+## 12. Umsetzungsnotizen (Abweichungen, 2026-11-08)
+
+- **numpy ist Abhängigkeit** (`requirements: ["numpy>=1.26.0"]`): numpy gehört nicht zum HA-Core, sondern wird von Core-Integrationen mitgebracht; die offene Versionsangabe akzeptiert das in HA installierte numpy, es wird nichts zusätzlich gebaut.
+- **Panel als Vanilla-Web-Component** statt Lit – kein Build-Schritt, keine Frontend-Toolchain im Repo.
+- **Automatik pro Kategorie** zusätzlich erst ab **≥ 5 sicheren Testvorhersagen** (sonst entscheidet ein Zufallstreffer).
+- **Ungewohnte Muster** (Abstand zu allen Trainingsbeispielen der vorhergesagten Klasse zu groß) bekommen Sicherheit 0 und bleiben offen.
+- **Buchung über `booked`-Flag:** Nur live erkannte Entnahmen zählen auf die Sensoren; Rückblick und Import nie. Import überschreibt keine vorhandenen Entnahmen und keine Nutzer-Einordnungen.
+- **Hängender Sensor:** Ein Durchflusswert wird höchstens 15 min fortgeschrieben, danach gilt es als Lücke.
+- **Großer Import** über `import_events` mit `path` (Datei in `allowlist_external_dirs`, z. B. `/media`).

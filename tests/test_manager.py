@@ -98,3 +98,35 @@ async def test_state_saved_while_sensor_keeps_reporting(hass, freezer, hass_stor
         await hass.async_block_till_done()
     key = f"water_insights.{entry.entry_id}"
     assert key in hass_storage and len(hass_storage[key]["data"]["events"]) == 1
+
+
+async def test_ha_stop_flushes_open_draw(hass, freezer, hass_storage):
+    from datetime import timedelta
+
+    from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+
+    entry = await setup_entry(hass)
+    set_flow(hass, 0.1)
+    freezer.tick(timedelta(seconds=5))
+    for i in range(30):
+        set_flow(hass, 9.0 + (i % 2) * 0.01)
+        freezer.tick(timedelta(seconds=2))
+    await hass.async_block_till_done()
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+    data = hass_storage[f"water_insights.{entry.entry_id}"]["data"]
+    assert len(data["events"]) == 1 and data["events"][0]["booked"]
+
+
+async def test_unsupported_unit_ignored(hass, freezer):
+    from datetime import timedelta
+
+    entry = await setup_entry(hass)
+    set_flow(hass, 0.0)
+    freezer.tick(timedelta(seconds=5))
+    for i in range(60):
+        set_flow(hass, 500 + i, unit="ml/s")
+        freezer.tick(timedelta(seconds=2))
+    set_flow(hass, 0.0)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.state.integral_l < 0.1

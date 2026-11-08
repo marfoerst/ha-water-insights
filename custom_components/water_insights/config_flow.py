@@ -74,13 +74,21 @@ def settings_schema(d: dict[str, Any], include_backfill: bool) -> vol.Schema:
     return vol.Schema(fields)
 
 
+RESERVED_SLUGS = {"mixed", "unclassified", "small", "model_status", "last_trained"}
+
+
 def clean_categories(raw: list[str]) -> list[str]:
-    """Strip, de-duplicate, drop the reserved name."""
+    """Strip, de-duplicate (by entity slug), drop reserved names."""
+    from homeassistant.util import slugify  # noqa: PLC0415
+
     out: list[str] = []
+    seen: set[str] = set()
     for c in raw:
-        c = c.strip()
-        if c and c != LABEL_MIXED and c not in out:
+        c = str(c).strip()
+        slug = slugify(c)
+        if c and slug and slug not in RESERVED_SLUGS and slug not in seen:
             out.append(c)
+            seen.add(slug)
     return out
 
 

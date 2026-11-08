@@ -32,6 +32,18 @@ SETTING_KEYS = (
 )
 
 
+SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_CATEGORIES): vol.All([vol.Coerce(str)], vol.Length(min=1)),
+        vol.Optional(CONF_START_FLOW): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20)),
+        vol.Optional(CONF_END_QUIET_S): vol.All(vol.Coerce(float), vol.Range(min=5, max=600)),
+        vol.Optional(CONF_MIN_VOLUME_L): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=100)),
+        vol.Optional(CONF_HELPER_ENTITIES): [vol.Coerce(str)],
+        vol.Optional(CONF_CONF_THRESHOLD): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=0.99)),
+    }
+)
+
+
 def _entry_info(m) -> dict[str, Any]:
     from homeassistant.util import dt as dt_util  # noqa: PLC0415
 
@@ -147,7 +159,14 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         from .config_flow import clean_categories  # noqa: PLC0415
 
         m = resolve(hass, msg["entry_id"])
-        new = {k: v for k, v in msg["settings"].items() if k in SETTING_KEYS}
+        try:
+            new = SETTINGS_SCHEMA({k: v for k, v in msg["settings"].items() if k in SETTING_KEYS})
+        except vol.Invalid as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_settings",
+                translation_placeholders={"error": str(err)},
+            ) from err
         if CONF_CATEGORIES in new:
             new[CONF_CATEGORIES] = clean_categories(new[CONF_CATEGORIES])
             if not new[CONF_CATEGORIES]:

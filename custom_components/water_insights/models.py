@@ -38,6 +38,7 @@ class WaterEvent:
     label_source: str | None = None
     prediction: str | None = None
     confidence: float | None = None
+    booked: bool = False  # liters counted on the category sensors (live draws only)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dict."""
@@ -61,4 +62,5 @@ class WaterEvent:
             label_source=data.get("label_source"),
             prediction=data.get("prediction"),
             confidence=data.get("confidence"),
+            booked=bool(data.get("booked", False)),
         )

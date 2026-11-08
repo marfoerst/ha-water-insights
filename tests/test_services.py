@@ -77,3 +77,46 @@ async def test_ws_list_and_events(hass, hass_ws_client, freezer):
 async def test_panel_registered(hass):
     await setup_entry(hass)
     assert "water-insights" in hass.data["frontend_panels"]
+
+
+async def test_update_settings_rejects_invalid(hass, hass_ws_client):
+    entry = await setup_entry(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "water_insights/update_settings", "entry_id": entry.entry_id,
+                        "settings": {"start_flow": 0}})
+    r = await ws.receive_json()
+    assert not r["success"] and r["error"]["message"] == "invalid_settings"
+    assert entry.options["start_flow"] == 1.0
+
+
+async def test_import_from_path(hass, tmp_path):
+    import json
+
+    entry = await setup_entry(hass)
+    f = tmp_path / "export.json"
+    f.write_text(json.dumps({"version": 1, "events": [e.to_dict() for e in generate(3, seed=2)]}))
+    hass.config.allowlist_external_dirs = {str(tmp_path)}
+    r = await hass.services.async_call(DOMAIN, "import_events", {"path": str(f)}, blocking=True, return_response=True)
+    assert r["imported"] > 10
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(DOMAIN, "import_events", {"path": "/etc/passwd"}, blocking=True, return_response=True)
+
+
+async def test_train_during_reload_keeps_new_state(hass):
+    entry = await setup_entry(hass)
+    old = entry.runtime_data
+    old.state.events.update({e.id: e for e in generate(40, seed=2)})
+    task = hass.async_create_task(old.async_train())
+    await old.async_stop()
+    await task
+    assert old.state.model is None  # dead manager did not adopt
+
+
+async def test_removing_entry_deletes_storage(hass, hass_storage, freezer):
+    entry = await setup_entry(hass)
+    await simulate_shower(hass, freezer)
+    await hass.config_entries.async_unload(entry.entry_id)
+    assert f"water_insights.{entry.entry_id}" in hass_storage
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert f"water_insights.{entry.entry_id}" not in hass_storage

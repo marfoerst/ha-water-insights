@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
@@ -49,11 +49,11 @@ from .const import (
     SOURCE_USER,
 )
 from .detector import EventDetector
-from .evaluation import TrainResult, train_and_evaluate
+from .evaluation import TrainResult, predict_events, train_and_evaluate
 from .features import extract
 from .models import DetectorConfig, WaterEvent
 from .storage import State as StoredState
-from .storage import effective_label, event_status, export_events, import_events, state_from_dict, state_to_dict
+from .storage import effective_label, event_status, export_events, merge_events, parse_events, state_from_dict, state_to_dict
 
 _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
@@ -74,6 +74,44 @@ def entry_options(entry: ConfigEntry) -> dict[str, Any]:
     o.setdefault(CONF_CONF_THRESHOLD, DEFAULT_CONF_THRESHOLD)
     o.setdefault(CONF_BACKFILL, True)
     return o
+
+
+def value_from_state(state: State, mode: str, factor: float) -> tuple[float | None, float]:
+    """Numeric value in L/min (flow) or L (counter) plus the factor in use.
+
+    A missing unit keeps the last factor; an unsupported unit yields None.
+    Thread-safe (State objects are immutable).
+    """
+    if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        return None, factor
+    try:
+        raw = float(state.state)
+    except ValueError:
+        return None, factor
+    unit = state.attributes.get("unit_of_measurement")
+    table = FLOW_UNITS if mode == MODE_FLOW else COUNTER_UNITS
+    if unit is not None:
+        if unit not in table:
+            return None, factor
+        factor = table[unit]
+    return raw * factor, factor
+
+
+def detect_history(
+    states: list[State], mode: str, config: DetectorConfig, until: float
+) -> list[WaterEvent]:
+    """Run the detector over recorded states (executor-safe)."""
+    det = EventDetector(config, mode)
+    factor = 1.0
+    found: list[WaterEvent] = []
+    for st in states:
+        ts = st.last_changed.timestamp()
+        if ts >= until:
+            break
+        value, factor = value_from_state(st, mode, factor)
+        found += det.feed(ts, value)
+    found += det.flush(until)
+    return found
 
 
 def _helper_value(state: State | None) -> float:
@@ -105,7 +143,9 @@ class WaterInsightsManager:
         )
         self.detector = EventDetector(self.detector_config, self.mode)
         self.state = StoredState()
-        self._store: Store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
+        self._store: Store = Store(
+            hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}", serialize_in_event_loop=False
+        )
         self._listeners: list[Callable[[], None]] = []
         self._unsubs: list[Callable[[], None]] = []
         self._helper_max: dict[str, float] = {}
@@ -113,6 +153,8 @@ class WaterInsightsManager:
         self._factor = 1.0
         self._model_cache: tuple[int, Any, NoveltyGuard] | None = None
         self._issue_checked_at = 0
+        self._enabled: set[str] = set()
+        self._stopped = False
 
     # -- lifecycle --------------------------------------------------------
     async def async_start(self) -> None:
@@ -120,6 +162,10 @@ class WaterInsightsManager:
         self.state = state_from_dict(await self._store.async_load())
         if self.state.counting_since is None:
             self.state.counting_since = time.time()
+        self._refresh_enabled()
+        self.entry.async_on_unload(
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_ha_stop)
+        )
         self._unsubs.append(
             async_track_state_change_event(
                 self.hass, [self.source, *self.helpers], self._on_state_change
@@ -137,14 +183,43 @@ class WaterInsightsManager:
             )
 
     async def async_stop(self) -> None:
-        """Stop listening and persist."""
+        """Stop listening, close an open draw and persist."""
+        if self._stopped:
+            return
+        self._stopped = True
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
         for ev in self.detector.flush(time.time()):
+            ev.helpers = dict(self._helper_max)
             self._handle_event(ev, live=True)
         self._sync_integral()
         await self._store.async_save(state_to_dict(self.state))
+
+    async def _on_ha_stop(self, _event) -> None:
+        await self.async_stop()
+
+    def _snapshot(self) -> StoredState:
+        st = self.state
+        return StoredState(
+            events=dict(st.events),
+            integral_l=st.integral_l,
+            model=st.model,
+            train_result=st.train_result,
+            model_stale=st.model_stale,
+            backfill_done=st.backfill_done,
+            counting_since=st.counting_since,
+        )
+
+    def _schedule_save(self, delay: float) -> None:
+        if self._stopped:
+            return
+        snap = self._snapshot()
+        self._store.async_delay_save(lambda: state_to_dict(snap), delay)
+
+    def _refresh_enabled(self) -> None:
+        res = self.train_result()
+        self._enabled = res.enabled_classes() if res and self.state.model else set()
 
     @callback
     def add_listener(self, cb: Callable[[], None]) -> Callable[[], None]:
@@ -157,26 +232,17 @@ class WaterInsightsManager:
         for cb in list(self._listeners):
             cb()
         if save:
-            self._store.async_delay_save(lambda: state_to_dict(self.state), SAVE_DELAY)
+            self._schedule_save(SAVE_DELAY)
 
     @callback
     def _periodic_save(self, _now) -> None:
         # the flow integral changes constantly; persist it on a fixed cadence
-        self._store.async_delay_save(lambda: state_to_dict(self.state), 1)
+        self._schedule_save(1)
 
     # -- input ------------------------------------------------------------
     def _value(self, state: State) -> float | None:
-        if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return None
-        try:
-            raw = float(state.state)
-        except ValueError:
-            return None
-        unit = state.attributes.get("unit_of_measurement")
-        table = FLOW_UNITS if self.mode == MODE_FLOW else COUNTER_UNITS
-        if unit in table:
-            self._factor = table[unit]
-        return raw * self._factor
+        value, self._factor = value_from_state(state, self.mode, self._factor)
+        return value
 
     @callback
     def _on_state_change(self, event: Event[EventStateChangedData]) -> None:
@@ -262,7 +328,7 @@ class WaterInsightsManager:
         self._predict(ev)
         self.state.events[ev.id] = ev
         if live:
-            self.state.live_volume_l += ev.volume_l
+            ev.booked = True
             self.hass.bus.async_fire(EVENT_DETECTED, self._event_payload(ev))
 
     def _event_payload(self, ev: WaterEvent) -> dict[str, Any]:
@@ -301,31 +367,28 @@ class WaterInsightsManager:
             return
         ev.prediction = model.classes[int(idx[0])]
         ev.confidence = float(conf[0])
-        enabled = set()
-        if self.state.train_result:
-            enabled = TrainResult.from_dict(self.state.train_result).enabled_classes()
-        allowed = (set(self.categories) | {LABEL_MIXED}) & enabled
+        allowed = (set(self.categories) | {LABEL_MIXED}) & self._enabled
         if ev.label is None and ev.prediction in allowed and ev.confidence >= self.conf_threshold:
             ev.label = ev.prediction
             ev.label_source = SOURCE_AUTO
 
     # -- queries ----------------------------------------------------------
     def totals(self) -> dict[str, float]:
-        """Liters per bucket for events since counting started."""
-        since = self.state.counting_since or 0.0
+        """Liters per bucket for live (booked) draws."""
         out = {c: 0.0 for c in [*self.categories, LABEL_MIXED, LABEL_UNCLASSIFIED]}
+        booked = 0.0
         for ev in self.state.events.values():
-            if ev.start >= since:
+            if ev.booked:
                 out[effective_label(ev, self.categories)] += ev.volume_l
-        out[LABEL_SMALL] = max(0.0, self.state.integral_l - self.state.live_volume_l)
+                booked += ev.volume_l
+        out[LABEL_SMALL] = max(0.0, self.state.integral_l - booked)
         return {k: round(v, 3) for k, v in out.items()}
 
     def period_totals(self, since_ts: float) -> dict[str, float]:
         """Liters per category for draws starting after since_ts (booked draws only)."""
-        since = max(since_ts, self.state.counting_since or 0.0)
         out = {c: 0.0 for c in [*self.categories, LABEL_MIXED, LABEL_UNCLASSIFIED]}
         for ev in self.state.events.values():
-            if ev.start >= since:
+            if ev.booked and ev.start >= since_ts:
                 out[effective_label(ev, self.categories)] += ev.volume_l
         return {k: round(v, 2) for k, v in out.items()}
 
@@ -389,34 +452,44 @@ class WaterInsightsManager:
         self.async_classify(event_id, label)
 
     async def async_train(self) -> TrainResult:
-        """Train in the executor and adopt the result."""
-        events = [WaterEvent.from_dict(e.to_dict()) for e in self.state.events.values()]
-        result: TrainResult = await self.hass.async_add_executor_job(
-            lambda: train_and_evaluate(
-                events,
-                self.categories,
-                self.helpers,
-                dt_util.get_default_time_zone(),
-                conf_threshold=self.conf_threshold,
-            )
-        )
+        """Train and re-score in the executor, then adopt the result."""
+        events = list(self.state.events.values())
+        categories, helpers = list(self.categories), list(self.helpers)
+        tz = dt_util.get_default_time_zone()
+        threshold = self.conf_threshold
+
+        def job():
+            result = train_and_evaluate(events, categories, helpers, tz, conf_threshold=threshold)
+            todo = [e for e in events if e.label_source != SOURCE_USER]
+            preds = predict_events(result.model, todo, tz) if result.ok else []
+            return result, {e.id: p for e, p in zip(todo, preds)}
+
+        result, preds = await self.hass.async_add_executor_job(job)
+        if self._stopped:  # entry reloaded/unloaded meanwhile: don't touch dead state
+            return result
         self.state.train_result = result.to_dict()
         if result.ok:
             self.state.model = result.model
             self.state.model_stale = False
             self._model_cache = None
-            for ev in self.state.events.values():  # refresh suggestions
-                if ev.label_source != SOURCE_USER:
-                    if ev.label_source == SOURCE_AUTO:
-                        ev.label, ev.label_source = None, None
-                    self._predict(ev)
+            self._refresh_enabled()
+            allowed = (set(self.categories) | {LABEL_MIXED}) & self._enabled
+            for eid, (pred, conf) in preds.items():
+                ev = self.state.events.get(eid)
+                if ev is None or ev.label_source == SOURCE_USER:
+                    continue
+                ev.prediction, ev.confidence = pred, conf
+                if pred in allowed and conf >= self.conf_threshold:
+                    ev.label, ev.label_source = pred, SOURCE_AUTO
+                elif ev.label_source == SOURCE_AUTO:
+                    ev.label, ev.label_source = None, None
         self._notify()
         return result
 
-    @callback
-    def async_import(self, data: dict[str, Any] | str) -> int:
-        """Import events."""
-        n = import_events(self.state, data)
+    async def async_import(self, data: dict[str, Any] | str) -> int:
+        """Parse in the executor, merge in the loop."""
+        events = await self.hass.async_add_executor_job(parse_events, data)
+        n = merge_events(self.state, events)
         self._notify()
         return n
 
@@ -434,15 +507,12 @@ class WaterInsightsManager:
         states = await get_instance(self.hass).async_add_executor_job(
             history.state_changes_during_period, self.hass, start, end, self.source
         )
-        det = EventDetector(self.detector_config, self.mode)
-        found: list[WaterEvent] = []
         since = self.state.counting_since or time.time()
-        for st in states.get(self.source, []):
-            ts = st.last_changed.timestamp()
-            if ts >= since:
-                break
-            found += det.feed(ts, self._value(st))
-        found += det.flush(since)
+        found = await self.hass.async_add_executor_job(
+            detect_history, states.get(self.source, []), self.mode, self.detector_config, since
+        )
+        if self._stopped:
+            return 0
         known = {(round(e.start), round(e.volume_l)) for e in self.state.events.values()}
         n = 0
         for ev in found:

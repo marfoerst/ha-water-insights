@@ -41,7 +41,10 @@ import_events:
         config_entry:
           integration: water_insights
     data:
-      required: true
       selector:
         text:
           multiline: true
+    path:
+      example: /media/wasser_events.jsonl
+      selector:
+        text:

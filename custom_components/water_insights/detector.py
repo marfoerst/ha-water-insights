@@ -15,6 +15,7 @@ from .const import MAX_SAMPLES
 from .models import DetectorConfig, WaterEvent
 
 MAX_INTERVAL_S = 3600.0  # longer silent gaps are treated as missing data
+STALE_S = 900.0  # a flow value older than this is no longer extrapolated
 
 
 def downsample(samples: list[tuple[float, float]], limit: int = MAX_SAMPLES):
@@ -42,6 +43,7 @@ class EventDetector:
         self.integral_l = 0.0
         self._last_ts: float | None = None
         self._last_value: float | None = None  # flow (L/min) or counter (L)
+        self._last_real_ts: float | None = None  # time of the last real reading
         self._intervals: deque[float] = deque(maxlen=200)
         self._n_feeds = 0
         self._reset_event()
@@ -68,6 +70,7 @@ class EventDetector:
             self._intervals.append(ts - self._last_ts)
         if value is not None:
             self._n_feeds += 1
+            self._last_real_ts = ts
 
         if value is None:
             done += self._close_now()
@@ -106,6 +109,13 @@ class EventDetector:
         if self.mode == "flow":
             if self._last_value is None:
                 return []
+            limit = (self._last_real_ts or self._last_ts) + STALE_S
+            if now > limit:
+                # sensor silent too long: integrate up to the limit, then treat as gap
+                done = self._interval(self._last_ts, limit, self._last_value) if limit > self._last_ts else []
+                done += self._close_now()
+                self._last_ts, self._last_value = now, None
+                return done
             done = self._interval(self._last_ts, now, self._last_value)
             self._last_ts = now
             return done

@@ -18,6 +18,8 @@ from .const import (
     SOURCE_USER,
 )
 from .features import matrix
+
+MIN_AUTO_EVIDENCE = 5  # confident test predictions needed before a class goes automatic
 from .models import WaterEvent
 
 
@@ -157,7 +159,7 @@ def train_and_evaluate(
         auto_ok = sum(t == c for _, t in auto)
         m.auto_precision = auto_ok / len(auto) if auto else None
         m.auto_coverage = auto_ok / n_true if n_true else None
-        m.enabled = m.auto_precision is not None and m.auto_precision >= min_precision
+        m.enabled = len(auto) >= MIN_AUTO_EVIDENCE and m.auto_precision >= min_precision
 
     Xall = matrix([e for c in qualifying for e in by_class[c]], helper_ids, tz)
     yall = [e.label for c in qualifying for e in by_class[c]]
@@ -172,3 +174,18 @@ def train_and_evaluate(
     }
     result.confusion = confusion
     return result
+
+
+def predict_events(
+    model_dict: dict[str, Any], events: list[WaterEvent], tz: tzinfo
+) -> list[tuple[str, float]]:
+    """Batch prediction (prediction, guarded confidence) for events."""
+    from .classifier import model_from_dict  # noqa: PLC0415
+
+    if not events:
+        return []
+    model = model_from_dict(model_dict)
+    guard = NoveltyGuard.from_dict(model_dict.get("guard", {}))
+    X = matrix(events, model_dict.get("helper_ids", []), tz)
+    _, idx, conf = guarded_confidence(model, guard, X)
+    return [(model.classes[int(i)], float(c)) for i, c in zip(idx, conf)]

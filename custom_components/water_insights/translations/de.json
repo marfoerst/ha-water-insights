@@ -107,6 +107,18 @@
     },
     "no_categories": {
       "message": "Mindestens eine Kategorie angeben."
+    },
+    "path_not_allowed": {
+      "message": "Pfad ist nicht in allowlist_external_dirs: {path}"
+    },
+    "path_not_readable": {
+      "message": "Datei kann nicht gelesen werden: {path}"
+    },
+    "data_required": {
+      "message": "Bitte data oder path angeben."
+    },
+    "invalid_settings": {
+      "message": "Ungültige Einstellungen: {error}"
     }
   },
   "issues": {
@@ -179,6 +191,10 @@
         "data": {
           "name": "Daten",
           "description": "Export-JSON oder JSONL-Text."
+        },
+        "path": {
+          "name": "Pfad",
+          "description": "Datei in einem erlaubten Verzeichnis (z. B. /media/…), für große Importe."
         }
       }
     }

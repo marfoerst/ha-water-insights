@@ -4,6 +4,7 @@ from __future__ import annotations
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import EntityCategory, UnitOfVolume
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -24,6 +25,11 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [CategorySensor(m, c, None) for c in m.categories]
     entities += [CategorySensor(m, k, k) for k in (LABEL_MIXED, LABEL_UNCLASSIFIED, LABEL_SMALL)]
     entities += [ModelStatusSensor(m), LastTrainedSensor(m)]
+    wanted = {e.unique_id for e in entities}
+    reg = er.async_get(hass)
+    for reg_entry in er.async_entries_for_config_entry(reg, entry.entry_id):
+        if reg_entry.domain == "sensor" and reg_entry.unique_id not in wanted:
+            reg.async_remove(reg_entry.entity_id)  # category was removed
     async_add_entities(entities)
 
 

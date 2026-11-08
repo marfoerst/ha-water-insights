@@ -48,6 +48,7 @@ def trained_state(manager):
     manager.state.model = res.model
     manager.state.train_result = res.to_dict()
     manager._model_cache = None
+    manager._refresh_enabled()
     return res
 
 

@@ -23,7 +23,6 @@ class State:
     model_stale: bool = False
     backfill_done: bool = False
     counting_since: float | None = None
-    live_volume_l: float = 0.0
 
 
 def state_to_dict(state: State) -> dict[str, Any]:
@@ -36,7 +35,6 @@ def state_to_dict(state: State) -> dict[str, Any]:
         "model_stale": state.model_stale,
         "backfill_done": state.backfill_done,
         "counting_since": state.counting_since,
-        "live_volume_l": state.live_volume_l,
     }
 
 
@@ -53,7 +51,6 @@ def state_from_dict(data: dict[str, Any] | None) -> State:
         model_stale=bool(data.get("model_stale", False)),
         backfill_done=bool(data.get("backfill_done", False)),
         counting_since=data.get("counting_since"),
-        live_volume_l=float(data.get("live_volume_l", 0.0)),
     )
 
 
@@ -134,6 +131,11 @@ def _parse_legacy(lines: list[str]) -> list[WaterEvent]:
 
 def import_events(state: State, data: dict[str, Any] | str) -> int:
     """Import events (v1 JSON dict/str or legacy JSONL str); returns count new/updated."""
+    return merge_events(state, parse_events(data))
+
+
+def parse_events(data: dict[str, Any] | str) -> list[WaterEvent]:
+    """Parse an export (dict or JSON string) or legacy JSONL text."""
     events: list[WaterEvent]
     if isinstance(data, str):
         text = data.strip()
@@ -147,13 +149,24 @@ def import_events(state: State, data: dict[str, Any] | str) -> int:
             events = _parse_legacy(text.splitlines())
     else:
         events = [WaterEvent.from_dict(e) for e in data.get("events", [])]
+    return events
+
+
+def merge_events(state: State, events: list[WaterEvent]) -> int:
+    """Merge parsed events into state without overwriting or booking."""
     n = 0
     for e in events:
+        e.booked = False  # imported history is never booked onto the sensors
         old = state.events.get(e.id)
-        if old is not None and old.to_dict() == e.to_dict():
+        if old is None:
+            state.events[e.id] = e
+            n += 1
             continue
-        state.events[e.id] = e
-        n += 1
+        # existing draw: only adopt a user label, never touch volume/samples and
+        # never replace an existing user label with an imported (older) one
+        if e.label_source == SOURCE_USER and e.label and old.label_source != SOURCE_USER:
+            old.label, old.label_source = e.label, SOURCE_USER
+            n += 1
     if n:
         state.model_stale = state.model is not None
     return n

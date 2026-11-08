@@ -8,6 +8,6 @@
   "integration_type": "helper",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/marfoerst/ha-water-insights/issues",
-  "requirements": [],
+  "requirements": ["numpy>=1.26.0"],
   "version": "0.1.0"
 }

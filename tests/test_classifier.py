@@ -71,3 +71,10 @@ def test_training_speed():
     res = train_and_evaluate(evs, CATS, [HELPER], UTC)
     assert res.ok
     assert time.monotonic() - t < 30
+
+
+def test_needs_auto_evidence():
+    evs = generate(60, seed=1)
+    res = train_and_evaluate(evs, CATS, [HELPER], UTC)
+    garden = res.per_class.get("Garten")
+    assert garden is not None and garden.n_total < 20 and not garden.enabled

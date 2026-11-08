@@ -107,6 +107,18 @@
     },
     "no_categories": {
       "message": "Add at least one category."
+    },
+    "path_not_allowed": {
+      "message": "Path is not in allowlist_external_dirs: {path}"
+    },
+    "path_not_readable": {
+      "message": "Cannot read file: {path}"
+    },
+    "data_required": {
+      "message": "Provide data or path."
+    },
+    "invalid_settings": {
+      "message": "Invalid settings: {error}"
     }
   },
   "issues": {
@@ -179,6 +191,10 @@
         "data": {
           "name": "Data",
           "description": "Export JSON or JSONL text."
+        },
+        "path": {
+          "name": "Path",
+          "description": "File in an allowed directory (e.g. /media/…), for large imports."
         }
       }
     }
