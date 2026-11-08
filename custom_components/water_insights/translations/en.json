@@ -1,0 +1,186 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Choose your water sensor",
+        "description": "Any sensor reporting flow (L/min, L/h, m³/h, gal/min) or a meter reading (L, m³, gal).",
+        "data": {
+          "source_entity": "Water sensor"
+        }
+      },
+      "settings": {
+        "title": "What counts as a draw",
+        "description": "Detected sensor type: {mode}",
+        "data": {
+          "categories": "Categories",
+          "start_flow": "Start flow threshold",
+          "end_quiet_s": "Quiet time until a draw ends",
+          "min_volume_l": "Minimum volume of a draw",
+          "helper_entities": "Helper sensors (optional)",
+          "conf_threshold": "Confidence for automatic classification",
+          "backfill": "Detect past draws from history"
+        },
+        "data_description": {
+          "categories": "What your water is used for. 'mixed' is built in for overlapping draws.",
+          "start_flow": "A draw starts when the flow reaches this value.",
+          "end_quiet_s": "A draw ends after the flow stayed below the threshold this long.",
+          "min_volume_l": "Smaller draws are counted as small amounts only.",
+          "helper_entities": "E.g. power of the washing machine plug or a bathroom presence sensor. Improves accuracy.",
+          "conf_threshold": "Below this confidence, draws stay open with a suggestion only.",
+          "backfill": "Uses the recorder history so you can start labeling right away."
+        }
+      }
+    },
+    "error": {
+      "unsupported_unit": "This sensor has no supported flow or volume unit.",
+      "no_categories": "Add at least one category."
+    },
+    "abort": {
+      "already_configured": "This sensor is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Settings",
+        "data": {
+          "categories": "Categories",
+          "start_flow": "Start flow threshold",
+          "end_quiet_s": "Quiet time until a draw ends",
+          "min_volume_l": "Minimum volume of a draw",
+          "helper_entities": "Helper sensors (optional)",
+          "conf_threshold": "Confidence for automatic classification"
+        },
+        "data_description": {
+          "categories": "What your water is used for. 'mixed' is built in for overlapping draws.",
+          "start_flow": "A draw starts when the flow reaches this value.",
+          "end_quiet_s": "A draw ends after the flow stayed below the threshold this long.",
+          "min_volume_l": "Smaller draws are counted as small amounts only.",
+          "helper_entities": "E.g. power of the washing machine plug or a bathroom presence sensor. Improves accuracy.",
+          "conf_threshold": "Below this confidence, draws stay open with a suggestion only."
+        }
+      }
+    },
+    "error": {
+      "no_categories": "Add at least one category."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "mixed": {
+        "name": "Mixed"
+      },
+      "unclassified": {
+        "name": "Unclassified"
+      },
+      "small": {
+        "name": "Small amounts"
+      },
+      "model_status": {
+        "name": "Model status",
+        "state": {
+          "untrained": "Untrained",
+          "trained": "Trained",
+          "stale": "Retraining recommended"
+        }
+      },
+      "last_trained": {
+        "name": "Last trained"
+      }
+    }
+  },
+  "exceptions": {
+    "unknown_event": {
+      "message": "Unknown draw: {event_id}"
+    },
+    "unknown_category": {
+      "message": "Unknown category: {category}"
+    },
+    "nothing_to_confirm": {
+      "message": "This draw has no label or suggestion to confirm."
+    },
+    "unknown_entry": {
+      "message": "Unknown Water Insights entry."
+    },
+    "entry_required": {
+      "message": "Several water sensors are set up; specify config_entry_id."
+    },
+    "no_categories": {
+      "message": "Add at least one category."
+    }
+  },
+  "issues": {
+    "slow_sensor": {
+      "title": "Water sensor reports too rarely",
+      "description": "{entity} reports only about every {interval} s. Draws can be detected, but telling them apart needs readings every few seconds."
+    }
+  },
+  "services": {
+    "classify_event": {
+      "name": "Classify draw",
+      "description": "Assign a category to a draw.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "Water Insights entry (optional with one sensor)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID of the draw."
+        },
+        "category": {
+          "name": "Category",
+          "description": "Category name or 'mixed'."
+        }
+      }
+    },
+    "confirm_event": {
+      "name": "Confirm draw",
+      "description": "Confirm the automatic classification or suggestion.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "Water Insights entry (optional with one sensor)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID of the draw."
+        }
+      }
+    },
+    "train_model": {
+      "name": "Train model",
+      "description": "Train the classifier on your labeled draws.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "Water Insights entry (optional with one sensor)."
+        }
+      }
+    },
+    "export_events": {
+      "name": "Export draws",
+      "description": "Return all draws as JSON.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "Water Insights entry (optional with one sensor)."
+        }
+      }
+    },
+    "import_events": {
+      "name": "Import draws",
+      "description": "Import draws from an export or legacy JSONL.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "Water Insights entry (optional with one sensor)."
+        },
+        "data": {
+          "name": "Data",
+          "description": "Export JSON or JSONL text."
+        }
+      }
+    }
+  }
+}

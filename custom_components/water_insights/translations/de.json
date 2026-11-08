@@ -1,0 +1,186 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Wassersensor wählen",
+        "description": "Jeder Sensor mit Durchfluss (L/min, L/h, m³/h, gal/min) oder Zählerstand (L, m³, gal).",
+        "data": {
+          "source_entity": "Wassersensor"
+        }
+      },
+      "settings": {
+        "title": "Was als Entnahme zählt",
+        "description": "Erkannter Sensortyp: {mode}",
+        "data": {
+          "categories": "Kategorien",
+          "start_flow": "Startschwelle Durchfluss",
+          "end_quiet_s": "Ruhezeit bis Ende einer Entnahme",
+          "min_volume_l": "Mindestmenge einer Entnahme",
+          "helper_entities": "Hilfssensoren (optional)",
+          "conf_threshold": "Sicherheit für automatische Einordnung",
+          "backfill": "Vergangene Entnahmen aus dem Verlauf erkennen"
+        },
+        "data_description": {
+          "categories": "Wofür Wasser verwendet wird. „Gemischt“ für überlappende Entnahmen ist eingebaut.",
+          "start_flow": "Eine Entnahme beginnt, sobald der Durchfluss diesen Wert erreicht.",
+          "end_quiet_s": "Eine Entnahme endet, wenn der Durchfluss so lange unter der Schwelle bleibt.",
+          "min_volume_l": "Kleinere Entnahmen zählen nur als Kleinmengen.",
+          "helper_entities": "Z. B. Leistung der Waschmaschinen-Steckdose oder Präsenzmelder im Bad. Verbessert die Trefferquote.",
+          "conf_threshold": "Darunter bleiben Entnahmen offen und zeigen nur einen Vorschlag.",
+          "backfill": "Nutzt den HA-Verlauf, damit du sofort einordnen kannst."
+        }
+      }
+    },
+    "error": {
+      "unsupported_unit": "Dieser Sensor hat keine unterstützte Durchfluss- oder Volumeneinheit.",
+      "no_categories": "Mindestens eine Kategorie angeben."
+    },
+    "abort": {
+      "already_configured": "Dieser Sensor ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Einstellungen",
+        "data": {
+          "categories": "Kategorien",
+          "start_flow": "Startschwelle Durchfluss",
+          "end_quiet_s": "Ruhezeit bis Ende einer Entnahme",
+          "min_volume_l": "Mindestmenge einer Entnahme",
+          "helper_entities": "Hilfssensoren (optional)",
+          "conf_threshold": "Sicherheit für automatische Einordnung"
+        },
+        "data_description": {
+          "categories": "Wofür Wasser verwendet wird. „Gemischt“ für überlappende Entnahmen ist eingebaut.",
+          "start_flow": "Eine Entnahme beginnt, sobald der Durchfluss diesen Wert erreicht.",
+          "end_quiet_s": "Eine Entnahme endet, wenn der Durchfluss so lange unter der Schwelle bleibt.",
+          "min_volume_l": "Kleinere Entnahmen zählen nur als Kleinmengen.",
+          "helper_entities": "Z. B. Leistung der Waschmaschinen-Steckdose oder Präsenzmelder im Bad. Verbessert die Trefferquote.",
+          "conf_threshold": "Darunter bleiben Entnahmen offen und zeigen nur einen Vorschlag."
+        }
+      }
+    },
+    "error": {
+      "no_categories": "Mindestens eine Kategorie angeben."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "mixed": {
+        "name": "Gemischt"
+      },
+      "unclassified": {
+        "name": "Nicht eingeordnet"
+      },
+      "small": {
+        "name": "Kleinmengen"
+      },
+      "model_status": {
+        "name": "Modellstatus",
+        "state": {
+          "untrained": "Nicht trainiert",
+          "trained": "Trainiert",
+          "stale": "Neues Training empfohlen"
+        }
+      },
+      "last_trained": {
+        "name": "Zuletzt trainiert"
+      }
+    }
+  },
+  "exceptions": {
+    "unknown_event": {
+      "message": "Unbekannte Entnahme: {event_id}"
+    },
+    "unknown_category": {
+      "message": "Unbekannte Kategorie: {category}"
+    },
+    "nothing_to_confirm": {
+      "message": "Diese Entnahme hat keine Einordnung oder keinen Vorschlag zum Bestätigen."
+    },
+    "unknown_entry": {
+      "message": "Unbekannter Water-Insights-Eintrag."
+    },
+    "entry_required": {
+      "message": "Mehrere Wassersensoren eingerichtet; bitte config_entry_id angeben."
+    },
+    "no_categories": {
+      "message": "Mindestens eine Kategorie angeben."
+    }
+  },
+  "issues": {
+    "slow_sensor": {
+      "title": "Wassersensor meldet zu selten",
+      "description": "{entity} meldet nur etwa alle {interval} s. Entnahmen werden erkannt, aber zum Unterscheiden braucht es Werte alle paar Sekunden."
+    }
+  },
+  "services": {
+    "classify_event": {
+      "name": "Entnahme einordnen",
+      "description": "Ordnet einer Entnahme eine Kategorie zu.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Water-Insights-Eintrag (bei einem Sensor optional)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID der Entnahme."
+        },
+        "category": {
+          "name": "Kategorie",
+          "description": "Kategoriename oder „mixed“."
+        }
+      }
+    },
+    "confirm_event": {
+      "name": "Entnahme bestätigen",
+      "description": "Bestätigt die automatische Einordnung bzw. den Vorschlag.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Water-Insights-Eintrag (bei einem Sensor optional)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID der Entnahme."
+        }
+      }
+    },
+    "train_model": {
+      "name": "Modell trainieren",
+      "description": "Trainiert das Modell mit deinen eingeordneten Entnahmen.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Water-Insights-Eintrag (bei einem Sensor optional)."
+        }
+      }
+    },
+    "export_events": {
+      "name": "Entnahmen exportieren",
+      "description": "Gibt alle Entnahmen als JSON zurück.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Water-Insights-Eintrag (bei einem Sensor optional)."
+        }
+      }
+    },
+    "import_events": {
+      "name": "Entnahmen importieren",
+      "description": "Importiert Entnahmen aus einem Export oder Legacy-JSONL.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Water-Insights-Eintrag (bei einem Sensor optional)."
+        },
+        "data": {
+          "name": "Daten",
+          "description": "Export-JSON oder JSONL-Text."
+        }
+      }
+    }
+  }
+}

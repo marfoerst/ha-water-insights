@@ -22,6 +22,8 @@ class State:
     train_result: dict[str, Any] | None = None
     model_stale: bool = False
     backfill_done: bool = False
+    counting_since: float | None = None
+    live_volume_l: float = 0.0
 
 
 def state_to_dict(state: State) -> dict[str, Any]:
@@ -33,6 +35,8 @@ def state_to_dict(state: State) -> dict[str, Any]:
         "train_result": state.train_result,
         "model_stale": state.model_stale,
         "backfill_done": state.backfill_done,
+        "counting_since": state.counting_since,
+        "live_volume_l": state.live_volume_l,
     }
 
 
@@ -48,6 +52,8 @@ def state_from_dict(data: dict[str, Any] | None) -> State:
         train_result=data.get("train_result"),
         model_stale=bool(data.get("model_stale", False)),
         backfill_done=bool(data.get("backfill_done", False)),
+        counting_since=data.get("counting_since"),
+        live_volume_l=float(data.get("live_volume_l", 0.0)),
     )
 
 

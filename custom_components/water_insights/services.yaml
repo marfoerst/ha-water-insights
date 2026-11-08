@@ -1,0 +1,47 @@
+classify_event:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: water_insights
+    event_id:
+      required: true
+      selector:
+        text:
+    category:
+      required: true
+      selector:
+        text:
+confirm_event:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: water_insights
+    event_id:
+      required: true
+      selector:
+        text:
+train_model:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: water_insights
+export_events:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: water_insights
+import_events:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: water_insights
+    data:
+      required: true
+      selector:
+        text:
+          multiline: true

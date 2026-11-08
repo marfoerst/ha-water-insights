@@ -1,0 +1,84 @@
+"""Manager behaviour inside Home Assistant."""
+from __future__ import annotations
+
+from homeassistant.helpers import issue_registry as ir
+
+from custom_components.water_insights.const import EVENT_DETECTED
+from pytest_homeassistant_custom_component.common import async_capture_events
+
+from .helpers import SOURCE, set_flow, setup_entry, simulate_shower, trained_state
+
+
+async def test_draw_creates_event_and_bus_event(hass, freezer):
+    entry = await setup_entry(hass)
+    events = async_capture_events(hass, EVENT_DETECTED)
+    await simulate_shower(hass, freezer)
+    m = entry.runtime_data
+    assert len(m.state.events) == 1
+    ev = next(iter(m.state.events.values()))
+    assert 55 < ev.volume_l < 65
+    assert len(events) == 1 and events[0].data["status"] == "open"
+    assert m.totals()["unclassified"] == ev.volume_l
+
+
+async def test_auto_classify_when_confident(hass, freezer):
+    entry = await setup_entry(hass)
+    trained_state(entry.runtime_data)
+    await simulate_shower(hass, freezer)
+    ev = next(iter(entry.runtime_data.state.events.values()))
+    assert ev.prediction == "Dusche"
+    assert ev.label == "Dusche" and ev.label_source == "auto"
+
+
+async def test_low_confidence_stays_open(hass, freezer):
+    entry = await setup_entry(hass, conf_threshold=0.999)
+    trained_state(entry.runtime_data)
+    entry.runtime_data.conf_threshold = 1.01
+    await simulate_shower(hass, freezer)
+    ev = next(iter(entry.runtime_data.state.events.values()))
+    assert ev.prediction is not None and ev.label is None
+
+
+async def test_unfamiliar_draw_stays_open(hass, freezer):
+    entry = await setup_entry(hass)
+    trained_state(entry.runtime_data)
+    await simulate_shower(hass, freezer, flow=45.0, seconds=1200)  # nothing like it trained
+    ev = next(iter(entry.runtime_data.state.events.values()))
+    assert ev.label is None and ev.confidence == 0.0
+
+
+async def test_persist_across_reload(hass, freezer):
+    entry = await setup_entry(hass)
+    await simulate_shower(hass, freezer)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert len(entry.runtime_data.state.events) == 1
+
+
+async def test_slow_sensor_issue(hass, freezer):
+    from datetime import timedelta
+
+    await setup_entry(hass)
+    for i in range(110):
+        set_flow(hass, 0.1 + (i % 2) * 0.01)
+        freezer.tick(timedelta(seconds=300))
+    await hass.async_block_till_done()
+    reg = ir.async_get(hass)
+    assert any(i.translation_key == "slow_sensor" for i in reg.issues.values())
+
+
+async def test_unavailable_source_no_invention(hass, freezer):
+    from datetime import timedelta
+
+    entry = await setup_entry(hass)
+    set_flow(hass, 10.0)
+    freezer.tick(timedelta(seconds=60))
+    set_flow(hass, 10.01)
+    freezer.tick(timedelta(seconds=2))
+    hass.states.async_set(SOURCE, "unavailable")
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(hours=2))
+    set_flow(hass, 0.0)
+    await hass.async_block_till_done()
+    evs = list(entry.runtime_data.state.events.values())
+    assert len(evs) == 1 and evs[0].volume_l < 11
