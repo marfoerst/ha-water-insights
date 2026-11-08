@@ -1,0 +1,13 @@
+{
+  "domain": "water_insights",
+  "name": "Water Insights",
+  "codeowners": ["@marfoerst"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "recorder", "websocket_api"],
+  "documentation": "https://github.com/marfoerst/ha-water-insights",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/marfoerst/ha-water-insights/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
