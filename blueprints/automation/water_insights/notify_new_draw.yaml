@@ -1,0 +1,89 @@
+blueprint:
+  name: Water Insights – ask what a draw was
+  description: >
+    Sends an actionable notification to a mobile app device when Water Insights
+    detects a draw that is still open (not classified automatically). Tapping a
+    button classifies the draw.
+  domain: automation
+  source_url: https://github.com/marfoerst/ha-water-insights/blob/main/blueprints/automation/water_insights/notify_new_draw.yaml
+  input:
+    notify_device:
+      name: Device to notify
+      selector:
+        device:
+          integration: mobile_app
+    min_volume:
+      name: Minimum volume (L)
+      default: 2
+      selector:
+        number: {min: 0, max: 500, step: 0.5, unit_of_measurement: L}
+    category_1:
+      name: Button 1 category
+      default: Dusche
+      selector: {text: {}}
+    category_2:
+      name: Button 2 category
+      default: Toilette
+      selector: {text: {}}
+    category_3:
+      name: Button 3 category
+      default: Wasserhahn
+      selector: {text: {}}
+
+mode: queued
+max: 20
+
+triggers:
+  - trigger: event
+    event_type: water_insights_event_detected
+    id: detected
+  - trigger: event
+    event_type: mobile_app_notification_action
+    id: answer
+
+variables:
+  min_volume: !input min_volume
+  cats:
+    - !input category_1
+    - !input category_2
+    - !input category_3
+
+conditions:
+  - condition: template
+    value_template: >
+      {% if trigger.id == 'detected' %}
+        {{ trigger.event.data.status == 'open' and trigger.event.data.volume_l | float(0) >= min_volume | float(0) }}
+      {% else %}
+        {{ trigger.event.data.action is string and trigger.event.data.action.startswith('WI|') }}
+      {% endif %}
+
+actions:
+  - choose:
+      - conditions: "{{ trigger.id == 'detected' }}"
+        sequence:
+          - domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            title: "💧 {{ trigger.event.data.volume_l }} L"
+            message: >
+              {{ (trigger.event.data.duration_s / 60) | round(1) }} min
+              {%- if trigger.event.data.prediction and trigger.event.data.confidence %}
+              · ? {{ trigger.event.data.prediction }} ({{ (trigger.event.data.confidence * 100) | round }} %)
+              {%- endif %}
+            data:
+              tag: "wi-{{ trigger.event.data.event_id }}"
+              actions: >
+                {% set ns = namespace(a=[]) %}
+                {% for c in cats if c %}
+                  {% set ns.a = ns.a + [{'action': 'WI|' ~ trigger.event.data.entry_id ~ '|' ~ trigger.event.data.event_id ~ '|' ~ c, 'title': c}] %}
+                {% endfor %}
+                {{ ns.a }}
+      - conditions: "{{ trigger.id == 'answer' }}"
+        sequence:
+          - variables:
+              parts: "{{ trigger.event.data.action.split('|') }}"
+          - action: water_insights.classify_event
+            data:
+              config_entry_id: "{{ parts[1] }}"
+              event_id: "{{ parts[2] }}"
+              category: "{{ parts[3] }}"

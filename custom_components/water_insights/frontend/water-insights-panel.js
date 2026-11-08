@@ -16,6 +16,7 @@ const I18N = {
     helpers: "Helper sensors (entity IDs, one per line)", export: "Export draws", import: "Import draws",
     imported: "Imported", noEntries: "No water sensor set up. Add the Water Insights integration first.",
     honest: "Measured on the newest draws the model has not seen during training.",
+    unfamiliar: "Unfamiliar pattern – no suggestion",
   },
   de: {
     title: "Water Insights", classify: "Einordnen", usage: "Verbrauch", model: "Modell", settings: "Einstellungen",
@@ -33,6 +34,7 @@ const I18N = {
     helpers: "Hilfssensoren (Entity-IDs, eine pro Zeile)", export: "Entnahmen exportieren", import: "Entnahmen importieren",
     imported: "Importiert", noEntries: "Kein Wassersensor eingerichtet. Bitte zuerst die Integration Water Insights hinzufügen.",
     honest: "Gemessen an den neuesten Entnahmen, die das Modell beim Training nicht gesehen hat.",
+    unfamiliar: "Unbekanntes Muster – kein Vorschlag",
   },
 };
 
@@ -174,11 +176,13 @@ class WaterInsightsPanel extends HTMLElement {
         const options = [`<option value="">${t.choose}</option>`]
           .concat(cats.map((c) => `<option value="${esc(c)}" ${e.label === c ? "selected" : ""}>${esc(this.label(c))}</option>`))
           .join("");
-        const sugg = e.prediction
-          ? `${t.suggestion}: <b>${esc(this.label(e.prediction))}</b> · ${t.confidence} ${pct(e.confidence)}`
-          : "";
+        const sugg = !e.prediction
+          ? ""
+          : e.confidence === 0
+          ? t.unfamiliar
+          : `${t.suggestion}: <b>${esc(this.label(e.prediction))}</b> · ${t.confidence} ${pct(e.confidence)}`;
         const badge = e.status === "auto" ? `<span class="badge">${t.auto}</span>` : `<span class="badge open">${t.open}</span>`;
-        const canConfirm = e.label || e.prediction;
+        const canConfirm = e.status === "auto";
         return `<div class="card row">
           <div class="meta">
             <div><b>${fmt.format(new Date(e.start * 1000))}</b> ${badge}</div>

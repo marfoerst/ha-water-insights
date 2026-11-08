@@ -1,0 +1,41 @@
+# Example dashboard view using only standard cards.
+# Replace "sensor.water_insights_water_flow_*" with your entity IDs
+# (Settings → Devices & services → Water Insights → entities).
+title: Water
+path: water
+type: sections
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: Water by use
+      - type: statistics-graph
+        title: Per day
+        chart_type: bar
+        period: day
+        days_to_show: 14
+        stat_types: [change]
+        entities:
+          - sensor.water_insights_water_flow_dusche
+          - sensor.water_insights_water_flow_toilette
+          - sensor.water_insights_water_flow_wasserhahn
+          - sensor.water_insights_water_flow_waschmaschine
+          - sensor.water_insights_water_flow_spulmaschine
+          - sensor.water_insights_water_flow_garten
+          - sensor.water_insights_water_flow_mixed
+          - sensor.water_insights_water_flow_unclassified
+          - sensor.water_insights_water_flow_small_amounts
+  - type: grid
+    cards:
+      - type: heading
+        heading: Model
+      - type: tile
+        entity: sensor.water_insights_water_flow_model_status
+      - type: tile
+        entity: sensor.water_insights_water_flow_last_trained
+      - type: button
+        name: Train model
+        icon: mdi:school
+        tap_action:
+          action: perform-action
+          perform_action: water_insights.train_model
