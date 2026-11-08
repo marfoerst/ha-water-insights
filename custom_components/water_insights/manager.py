@@ -59,6 +59,7 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 SAVE_DELAY = 30
 TICK = timedelta(seconds=10)
+PERIODIC_SAVE = timedelta(minutes=5)
 
 
 def entry_options(entry: ConfigEntry) -> dict[str, Any]:
@@ -125,6 +126,9 @@ class WaterInsightsManager:
             )
         )
         self._unsubs.append(async_track_time_interval(self.hass, self._on_tick, TICK))
+        self._unsubs.append(
+            async_track_time_interval(self.hass, self._periodic_save, PERIODIC_SAVE)
+        )
         if (cur := self.hass.states.get(self.source)) is not None:
             self._feed(cur, ts=time.time())
         if self.options[CONF_BACKFILL] and not self.state.backfill_done:
@@ -149,10 +153,16 @@ class WaterInsightsManager:
         return lambda: self._listeners.remove(cb)
 
     @callback
-    def _notify(self) -> None:
+    def _notify(self, save: bool = True) -> None:
         for cb in list(self._listeners):
             cb()
-        self._store.async_delay_save(lambda: state_to_dict(self.state), SAVE_DELAY)
+        if save:
+            self._store.async_delay_save(lambda: state_to_dict(self.state), SAVE_DELAY)
+
+    @callback
+    def _periodic_save(self, _now) -> None:
+        # the flow integral changes constantly; persist it on a fixed cadence
+        self._store.async_delay_save(lambda: state_to_dict(self.state), 1)
 
     # -- input ------------------------------------------------------------
     def _value(self, state: State) -> float | None:
@@ -216,8 +226,10 @@ class WaterInsightsManager:
         for ev in done:
             ev.helpers = dict(self._helper_max)
             self._handle_event(ev, live=True)
-        if done or self._listeners:
-            self._notify()
+        if done:
+            self._notify(save=True)
+        elif self._listeners:
+            self._notify(save=False)
 
     def _check_sensor_rate(self) -> None:
         n = self.detector.n_feeds
@@ -307,6 +319,15 @@ class WaterInsightsManager:
                 out[effective_label(ev, self.categories)] += ev.volume_l
         out[LABEL_SMALL] = max(0.0, self.state.integral_l - self.state.live_volume_l)
         return {k: round(v, 3) for k, v in out.items()}
+
+    def period_totals(self, since_ts: float) -> dict[str, float]:
+        """Liters per category for draws starting after since_ts (booked draws only)."""
+        since = max(since_ts, self.state.counting_since or 0.0)
+        out = {c: 0.0 for c in [*self.categories, LABEL_MIXED, LABEL_UNCLASSIFIED]}
+        for ev in self.state.events.values():
+            if ev.start >= since:
+                out[effective_label(ev, self.categories)] += ev.volume_l
+        return {k: round(v, 2) for k, v in out.items()}
 
     def events(self, status: str | None = None, limit: int = 200) -> list[WaterEvent]:
         """Events newest first, optionally filtered by status."""

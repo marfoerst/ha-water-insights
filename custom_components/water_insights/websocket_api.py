@@ -1,6 +1,7 @@
 """Websocket commands for the sidebar panel."""
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -32,7 +33,16 @@ SETTING_KEYS = (
 
 
 def _entry_info(m) -> dict[str, Any]:
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
     res = m.train_result()
+    now = dt_util.now()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    periods = {
+        "today": midnight.timestamp(),
+        "week": (midnight - timedelta(days=now.weekday())).timestamp(),
+        "month": midnight.replace(day=1).timestamp(),
+    }
     return {
         "entry_id": m.entry.entry_id,
         "title": m.entry.title,
@@ -40,6 +50,7 @@ def _entry_info(m) -> dict[str, Any]:
         "mode": m.mode,
         "categories": m.categories,
         "totals": m.totals(),
+        "periods": {k: m.period_totals(v) for k, v in periods.items()},
         "model_status": m.model_status(),
         "train_result": res.to_dict() | {"model": None} if res else None,
         "settings": {k: m.options.get(k) for k in SETTING_KEYS},

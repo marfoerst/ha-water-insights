@@ -82,3 +82,19 @@ async def test_unavailable_source_no_invention(hass, freezer):
     await hass.async_block_till_done()
     evs = list(entry.runtime_data.state.events.values())
     assert len(evs) == 1 and evs[0].volume_l < 11
+
+
+async def test_state_saved_while_sensor_keeps_reporting(hass, freezer, hass_storage):
+    from datetime import timedelta
+
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    entry = await setup_entry(hass)
+    await simulate_shower(hass, freezer)
+    for i in range(40):  # sensor keeps reporting every 2 s for > 1 min
+        set_flow(hass, 0.1 + (i % 2) * 0.01)
+        freezer.tick(timedelta(seconds=2))
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+    key = f"water_insights.{entry.entry_id}"
+    assert key in hass_storage and len(hass_storage[key]["data"]["events"]) == 1
