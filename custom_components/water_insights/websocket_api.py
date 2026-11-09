@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 
 from .const import (
+    CONF_APPLIANCES,
     CONF_CATEGORIES,
     CONF_CONF_THRESHOLD,
     CONF_END_QUIET_S,
@@ -29,8 +30,16 @@ SETTING_KEYS = (
     CONF_MIN_VOLUME_L,
     CONF_HELPER_ENTITIES,
     CONF_CONF_THRESHOLD,
+    CONF_APPLIANCES,
 )
 
+APPLIANCE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): vol.All(vol.Coerce(str), vol.Length(min=3)),
+        vol.Required("category"): vol.Coerce(str),
+        vol.Optional("threshold", default=10.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+    }
+)
 
 SETTINGS_SCHEMA = vol.Schema(
     {
@@ -40,6 +49,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional(CONF_MIN_VOLUME_L): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=100)),
         vol.Optional(CONF_HELPER_ENTITIES): [vol.Coerce(str)],
         vol.Optional(CONF_CONF_THRESHOLD): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=0.99)),
+        vol.Optional(CONF_APPLIANCES): [APPLIANCE_SCHEMA],
     }
 )
 
@@ -133,6 +143,28 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         return {}
 
     @websocket_api.websocket_command(
+        {
+            vol.Required("type"): f"{DOMAIN}/classify_many",
+            vol.Required("entry_id"): str,
+            vol.Required("event_ids"): vol.All([str], vol.Length(min=1, max=1000)),
+            vol.Required("category"): str,
+        }
+    )
+    @websocket_api.require_admin
+    @websocket_api.async_response
+    @_wrap
+    def ws_classify_many(hass, msg):
+        n = resolve(hass, msg["entry_id"]).async_classify_many(msg["event_ids"], msg["category"])
+        return {"classified": n}
+
+    @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/groups", vol.Required("entry_id"): str})
+    @websocket_api.require_admin
+    @websocket_api.async_response
+    @_wrap
+    async def ws_groups(hass, msg):
+        return {"groups": await resolve(hass, msg["entry_id"]).async_groups()}
+
+    @websocket_api.websocket_command(
         {vol.Required("type"): f"{DOMAIN}/confirm", vol.Required("entry_id"): str, vol.Required("event_id"): str}
     )
     @websocket_api.require_admin
@@ -171,8 +203,16 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
             new[CONF_CATEGORIES] = clean_categories(new[CONF_CATEGORIES])
             if not new[CONF_CATEGORIES]:
                 raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_categories")
+        if CONF_APPLIANCES in new:
+            cats = new.get(CONF_CATEGORIES, m.categories)
+            if bad := [r["category"] for r in new[CONF_APPLIANCES] if r["category"] not in cats]:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_settings",
+                    translation_placeholders={"error": f"unknown category {bad[0]}"},
+                )
         hass.config_entries.async_update_entry(m.entry, options={**m.entry.options, **new})
         return {}
 
-    for cmd in (ws_list, ws_events, ws_classify, ws_confirm, ws_train, ws_update):
+    for cmd in (ws_list, ws_events, ws_classify, ws_classify_many, ws_groups, ws_confirm, ws_train, ws_update):
         websocket_api.async_register_command(hass, cmd)

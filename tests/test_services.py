@@ -120,3 +120,78 @@ async def test_removing_entry_deletes_storage(hass, hass_storage, freezer):
     await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert f"water_insights.{entry.entry_id}" not in hass_storage
+
+
+WM = "sensor.washer_power"
+
+
+def _inject(m, n, power, start=1_000_000.0, step=600.0, prefix="wm"):
+    from custom_components.water_insights.models import WaterEvent
+
+    ids = []
+    for i in range(n):
+        e = WaterEvent(id=f"{prefix}{i}", start=start + i * step, end=start + i * step + 60, volume_l=8.0,
+                       duration_s=60, max_flow=7.3, helpers={WM: power})
+        m.state.events[e.id] = e
+        ids.append(e.id)
+    return ids
+
+
+async def test_ws_classify_many(hass, hass_ws_client):
+    entry = await setup_entry(hass)
+    m = entry.runtime_data
+    ids = _inject(m, 3, 60.0)
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "water_insights/classify_many", "entry_id": entry.entry_id,
+                        "event_ids": ids[:2], "category": "Waschmaschine"})
+    assert (await ws.receive_json())["success"]
+    assert [m.state.events[i].label for i in ids] == ["Waschmaschine", "Waschmaschine", None]
+    assert m.state.events[ids[0]].label_source == "user"
+    # all-or-nothing: one unknown id rejects the whole batch
+    await ws.send_json({"id": 2, "type": "water_insights/classify_many", "entry_id": entry.entry_id,
+                        "event_ids": [ids[2], "nope"], "category": "Toilette"})
+    r = await ws.receive_json()
+    assert not r["success"] and r["error"]["message"] == "unknown_event"
+    assert m.state.events[ids[2]].label is None
+
+
+async def test_ws_groups_from_appliance_rule(hass, hass_ws_client):
+    entry = await setup_entry(hass, helper_entities=[WM],
+                              appliances=[{"entity_id": WM, "category": "Waschmaschine", "threshold": 10}])
+    m = entry.runtime_data
+    _inject(m, 4, 60.0)
+    _inject(m, 2, 2.0, start=2_000_000.0, prefix="idle")  # machine idle: no group
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "water_insights/groups", "entry_id": entry.entry_id})
+    r = await ws.receive_json()
+    assert r["success"]
+    (g,) = r["result"]["groups"]
+    assert g["category"] == "Waschmaschine" and len(g["event_ids"]) == 4 and len(g["preselected"]) == 4
+    await ws.send_json({"id": 2, "type": "water_insights/list"})
+    s = (await ws.receive_json())["result"]["entries"][0]["settings"]
+    assert s["appliances"] == [{"entity_id": WM, "category": "Waschmaschine", "threshold": 10}]
+
+
+async def test_ws_update_settings_appliances(hass, hass_ws_client):
+    entry = await setup_entry(hass, helper_entities=[WM])
+    ws = await hass_ws_client(hass)
+    rule = {"entity_id": WM, "category": "Waschmaschine", "threshold": 15}
+    await ws.send_json({"id": 1, "type": "water_insights/update_settings", "entry_id": entry.entry_id,
+                        "settings": {"appliances": [rule]}})
+    assert (await ws.receive_json())["success"]
+    await hass.async_block_till_done()
+    assert entry.options["appliances"] == [{**rule, "threshold": 15.0}]
+    await ws.send_json({"id": 2, "type": "water_insights/update_settings", "entry_id": entry.entry_id,
+                        "settings": {"appliances": [{"entity_id": WM, "category": "Pool"}]}})
+    r = await ws.receive_json()
+    assert not r["success"] and r["error"]["message"] == "invalid_settings"
+
+
+async def test_panel_survives_reload_and_goes_with_last_entry(hass):
+    entry = await setup_entry(hass)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert "water-insights" in hass.data["frontend_panels"]  # open browser tabs keep their page
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert "water-insights" not in hass.data["frontend_panels"]

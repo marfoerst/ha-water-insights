@@ -10,6 +10,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_APPLIANCES,
     CONF_BACKFILL,
     CONF_CATEGORIES,
     CONF_CONF_THRESHOLD,
@@ -164,7 +165,10 @@ class WaterInsightsOptionsFlow(OptionsFlow):
             if not cats:
                 errors[CONF_CATEGORIES] = "no_categories"
             else:
-                keep = {CONF_BACKFILL: self.config_entry.options.get(CONF_BACKFILL, True)}
+                keep = {
+                    CONF_BACKFILL: self.config_entry.options.get(CONF_BACKFILL, True),
+                    CONF_APPLIANCES: self.config_entry.options.get(CONF_APPLIANCES, []),
+                }
                 return self.async_create_entry(data={**keep, **user_input, CONF_CATEGORIES: cats})
         return self.async_show_form(
             step_id="init",

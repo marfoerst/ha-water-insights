@@ -46,11 +46,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: WaterInsightsConfigEntr
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
         await entry.runtime_data.async_stop()
-        others = [
-            e for e in hass.config_entries.async_loaded_entries(DOMAIN) if e.entry_id != entry.entry_id
-        ]
-        if not others:
-            async_unregister_panel(hass)
+    # The panel stays while entries reload (saving settings reloads the entry and would
+    # otherwise kick open browser tabs off the page); it goes with the last removed entry.
     return ok
 
 
@@ -59,3 +56,5 @@ async def async_remove_entry(hass: HomeAssistant, entry: WaterInsightsConfigEntr
     from homeassistant.helpers.storage import Store  # noqa: PLC0415
 
     await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}").async_remove()
+    if not [e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id != entry.entry_id]:
+        async_unregister_panel(hass)

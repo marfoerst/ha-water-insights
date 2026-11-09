@@ -19,6 +19,10 @@ const I18N = {
     unfamiliar: "Unfamiliar pattern – no suggestion",
     invalid: "Please fill in all fields with valid values.",
     tooLarge: "File too large for the browser upload. Copy it to /media and call the service water_insights.import_events with path.",
+    ran: "ran", draws: "draws", groupHint: "Ticked = belongs to the appliance. Untick whatever was something else.",
+    applyGroup: "Classify ticked as", others: "Other draws", selected: "selected", apply: "Classify",
+    appliances: "Appliances", appliancesHint: "Couple a helper sensor to a category. Draws while its value is at or above the threshold are grouped as one appliance run on the Classify tab. Nothing is classified automatically by this.",
+    noAppliance: "– no appliance –", threshold: "from value", noHelpers: "Add helper sensors above and save first.",
   },
   de: {
     title: "Water Insights", classify: "Einordnen", usage: "Verbrauch", model: "Modell", settings: "Einstellungen",
@@ -39,6 +43,10 @@ const I18N = {
     unfamiliar: "Unbekanntes Muster – kein Vorschlag",
     invalid: "Bitte alle Felder mit gültigen Werten ausfüllen.",
     tooLarge: "Datei zu groß für den Upload im Browser. Nach /media kopieren und die Aktion water_insights.import_events mit path aufrufen.",
+    ran: "lief", draws: "Entnahmen", groupHint: "Häkchen = gehört zum Gerät. Was etwas anderes war, abwählen.",
+    applyGroup: "Ausgewählte einordnen als", others: "Weitere Entnahmen", selected: "ausgewählt", apply: "Einordnen",
+    appliances: "Gerätekopplung", appliancesHint: "Koppelt einen Hilfssensor an eine Kategorie. Entnahmen, während sein Wert die Schwelle erreicht, werden im Tab Einordnen als ein Gerätelauf gruppiert. Automatisch eingeordnet wird dadurch nichts.",
+    noAppliance: "– kein Gerät –", threshold: "ab Wert", noHelpers: "Zuerst oben Hilfssensoren eintragen und speichern.",
   },
 };
 
@@ -53,6 +61,9 @@ class WaterInsightsPanel extends HTMLElement {
     this._entries = [];
     this._entryId = null;
     this._events = [];
+    this._groups = [];
+    this._sel = new Set(); // ticked draws in the plain list
+    this._gtoggle = new Map(); // draw id -> ticked state overriding a group's preselection
     this._busy = false;
     this._msg = "";
     this._loaded = false;
@@ -68,7 +79,7 @@ class WaterInsightsPanel extends HTMLElement {
 
   connectedCallback() {
     this._timer = setInterval(() => {
-      if (!this._busy && this._tab !== "settings") this._refresh();
+      if (!this._busy && this._tab !== "settings" && !this._sel.size && !this._gtoggle.size) this._refresh();
     }, 30000);
     if (this._loaded) this._refresh();
   }
@@ -102,12 +113,17 @@ class WaterInsightsPanel extends HTMLElement {
       this._entries = r.entries;
       if (!this.entry && this._entries.length) this._entryId = this._entries[0].entry_id;
       if (this.entry) {
-        const [open, auto] = await Promise.all(
-          ["open", "auto"].map((status) =>
-            this._hass.callWS({ type: "water_insights/events", entry_id: this._entryId, status, limit: 100 })
-          )
-        );
+        const [open, auto, groups] = await Promise.all([
+          ...["open", "auto"].map((status) =>
+            this._hass.callWS({ type: "water_insights/events", entry_id: this._entryId, status, limit: 300 })
+          ),
+          this._hass.callWS({ type: "water_insights/groups", entry_id: this._entryId }),
+        ]);
         this._events = [...open.events, ...auto.events].sort((a, b) => b.start - a.start);
+        this._groups = groups.groups;
+        const ids = new Set(this._events.map((e) => e.id));
+        this._sel = new Set([...this._sel].filter((id) => ids.has(id)));
+        this._gtoggle = new Map([...this._gtoggle].filter(([id]) => ids.has(id)));
       }
     } catch (err) {
       this._msg = err.message || String(err);
@@ -170,12 +186,53 @@ class WaterInsightsPanel extends HTMLElement {
     return `<svg viewBox="0 0 ${w} ${h}" class="spark" aria-hidden="true"><polyline points="${pts}"/></svg>`;
   }
 
+  _groupChecked(g, id) {
+    return this._gtoggle.has(id) ? this._gtoggle.get(id) : g.preselected.includes(id);
+  }
+
   _classify() {
     const t = this.t;
     if (!this._events.length) return `<p class="muted">${t.none}</p>`;
     const cats = [...this.entry.categories, "mixed"];
     const fmt = new Intl.DateTimeFormat(this._hass.language, { dateStyle: "short", timeStyle: "short" });
-    return this._events
+    const tfmt = new Intl.DateTimeFormat(this._hass.language, { timeStyle: "short" });
+    const byId = new Map(this._events.map((e) => [e.id, e]));
+    const grouped = new Set(this._groups.flatMap((g) => g.event_ids));
+    const groupsHtml = this._groups
+      .map((g, gi) => {
+        const evs = g.event_ids.map((id) => byId.get(id)).filter(Boolean);
+        if (!evs.length) return "";
+        const n = evs.filter((e) => this._groupChecked(g, e.id)).length;
+        const rows = evs
+          .map((e) => {
+            const sugg = e.prediction && e.confidence > 0 && e.prediction !== g.category
+              ? ` · ${t.suggestion}: ${esc(this.label(e.prediction))} ${pct(e.confidence)}` : "";
+            return `<label class="grow">
+              <input type="checkbox" data-gtick="${esc(e.id)}" data-gi="${gi}" ${this._groupChecked(g, e.id) ? "checked" : ""}>
+              <span class="gtime">${tfmt.format(new Date(e.start * 1000))}</span>
+              <span>${e.volume_l.toFixed(1)} ${t.liters} · ${Math.round(e.duration_s)} s · max ${e.max_flow.toFixed(1)}<span class="muted">${sugg}</span></span>
+              ${this._spark(e.samples)}
+            </label>`;
+          })
+          .join("");
+        return `<div class="card group">
+          <div class="ghead"><b>${esc(this.label(g.category))}</b> ${t.ran} ${fmt.format(new Date(g.start * 1000))}–${tfmt.format(new Date(g.end * 1000))} · ${evs.length} ${t.draws}</div>
+          <p class="muted">${t.groupHint}</p>
+          ${rows}
+          <button data-gapply="${gi}" ${this._busy || !n ? "disabled" : ""}>${t.applyGroup} ${esc(this.label(g.category))} (${n})</button>
+        </div>`;
+      })
+      .join("");
+    const rest = this._events.filter((e) => !grouped.has(e.id));
+    const bulk = this._sel.size
+      ? `<div class="card bulk"><b>${this._sel.size} ${t.selected}</b>
+          <select id="bulkcat" aria-label="${t.category}"><option value="">${t.choose}</option>${cats
+            .map((c) => `<option value="${esc(c)}">${esc(this.label(c))}</option>`)
+            .join("")}</select>
+          <button id="bulkapply" ${this._busy ? "disabled" : ""}>${t.apply}</button></div>`
+      : "";
+    const head = groupsHtml && rest.length ? `<h3>${t.others}</h3>` : "";
+    return groupsHtml + head + bulk + rest
       .map((e) => {
         const options = [`<option value="">${t.choose}</option>`]
           .concat(cats.map((c) => `<option value="${esc(c)}" ${e.label === c ? "selected" : ""}>${esc(this.label(c))}</option>`))
@@ -188,6 +245,7 @@ class WaterInsightsPanel extends HTMLElement {
         const badge = e.status === "auto" ? `<span class="badge">${t.auto}</span>` : `<span class="badge open">${t.open}</span>`;
         const canConfirm = e.status === "auto";
         return `<div class="card row">
+          <input type="checkbox" data-sel="${esc(e.id)}" ${this._sel.has(e.id) ? "checked" : ""} aria-label="${t.selected}">
           <div class="meta">
             <div><b>${fmt.format(new Date(e.start * 1000))}</b> ${badge}</div>
             <div>${e.volume_l.toFixed(1)} ${t.liters} · ${(e.duration_s / 60).toFixed(1)} ${t.min} · max ${e.max_flow.toFixed(1)} L/min</div>
@@ -267,12 +325,34 @@ class WaterInsightsPanel extends HTMLElement {
       <label>${t.minVolume}<input id="s_min_volume_l" type="number" step="0.1" min="0.1" max="100" required value="${s.min_volume_l}"></label>
       <label>${t.confThreshold}<input id="s_conf_threshold" type="number" step="0.01" min="0.5" max="0.99" required value="${s.conf_threshold}"></label>
       <label>${t.helpers}<textarea id="s_helper_entities" rows="3">${esc((s.helper_entities || []).join("\n"))}</textarea></label>
+      <fieldset><legend>${t.appliances}</legend><p class="muted">${t.appliancesHint}</p>${this._applianceRows(s)}</fieldset>
       <button id="save" ${this._busy ? "disabled" : ""}>${t.save}</button>
     </div>
     <div class="card">
       <button id="export">${t.export}</button>
       <label class="file">${t.import}<input id="import" type="file" accept=".json,.jsonl,application/json"></label>
     </div>`;
+  }
+
+  _applianceRows(s) {
+    const t = this.t;
+    const helpers = s.helper_entities || [];
+    if (!helpers.length) return `<p class="muted">${t.noHelpers}</p>`;
+    const rules = s.appliances || [];
+    return helpers
+      .map((h, i) => {
+        const r = rules.find((x) => x.entity_id === h);
+        const opts = [`<option value="">${t.noAppliance}</option>`]
+          .concat(this.entry.categories.map((c) => `<option value="${esc(c)}" ${r?.category === c ? "selected" : ""}>${esc(c)}</option>`))
+          .join("");
+        const name = this._hass.states[h]?.attributes?.friendly_name || h;
+        return `<div class="arow" data-helper="${esc(h)}">
+          <span title="${esc(h)}">${esc(name)}</span>
+          <select data-acat="${i}">${opts}</select>
+          <label class="inline">${t.threshold}<input data-athr="${i}" type="number" step="any" min="0" value="${r ? r.threshold : 10}"></label>
+        </div>`;
+      })
+      .join("");
   }
 
   // -- events --------------------------------------------------------------
@@ -295,6 +375,35 @@ class WaterInsightsPanel extends HTMLElement {
         if (sel.value) this._ws({ type: "water_insights/classify", event_id: sel.dataset.classify, category: sel.value });
       })
     );
+    root.querySelectorAll("[data-sel]").forEach((cb) =>
+      cb.addEventListener("change", () => {
+        if (cb.checked) this._sel.add(cb.dataset.sel);
+        else this._sel.delete(cb.dataset.sel);
+        this._render();
+      })
+    );
+    root.getElementById("bulkapply")?.addEventListener("click", async () => {
+      const cat = root.getElementById("bulkcat").value;
+      if (!cat) return;
+      const ids = [...this._sel];
+      this._sel.clear();
+      await this._ws({ type: "water_insights/classify_many", event_ids: ids, category: cat });
+    });
+    root.querySelectorAll("[data-gtick]").forEach((cb) =>
+      cb.addEventListener("change", () => {
+        this._gtoggle.set(cb.dataset.gtick, cb.checked);
+        this._render();
+      })
+    );
+    root.querySelectorAll("[data-gapply]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const g = this._groups[Number(b.dataset.gapply)];
+        const ids = g.event_ids.filter((id) => this._groupChecked(g, id));
+        if (!ids.length) return;
+        g.event_ids.forEach((id) => this._gtoggle.delete(id));
+        await this._ws({ type: "water_insights/classify_many", event_ids: ids, category: g.category });
+      })
+    );
     root.querySelectorAll("[data-confirm]").forEach((b) =>
       b.addEventListener("click", () => this._ws({ type: "water_insights/confirm", event_id: b.dataset.confirm }))
     );
@@ -312,9 +421,17 @@ class WaterInsightsPanel extends HTMLElement {
         this._render();
         return;
       }
+      const appliances = [...root.querySelectorAll("[data-helper]")]
+        .map((row) => ({
+          entity_id: row.dataset.helper,
+          category: row.querySelector("[data-acat]").value,
+          threshold: Number(row.querySelector("[data-athr]").value || 0),
+        }))
+        .filter((r) => r.category && lines("s_helper_entities").includes(r.entity_id));
       const res = await this._ws({
         type: "water_insights/update_settings",
         settings: {
+          appliances,
           categories: lines("s_categories"),
           start_flow: Number(v("s_start_flow")),
           end_quiet_s: Number(v("s_end_quiet_s")),
@@ -392,6 +509,20 @@ th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--divider
 .form { display:grid; gap:12px; }
 .form label, .file { display:grid; gap:4px; font-size:14px; }
 .file { margin-top:12px; }
+.group .ghead { font-size:15px; }
+.grow { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--divider-color); font-size:14px; flex-wrap:wrap; }
+.grow .spark { margin-left:auto; }
+.gtime { font-variant-numeric:tabular-nums; min-width:48px; font-weight:500; }
+.group button { margin-top:10px; }
+.bulk { display:flex; align-items:center; gap:10px; flex-wrap:wrap; position:sticky; top:0; z-index:1; }
+h3 { font-size:15px; font-weight:500; margin:20px 0 8px; }
+fieldset { border:1px solid var(--divider-color); border-radius:8px; padding:8px 12px; display:grid; gap:8px; }
+legend { padding:0 4px; font-size:14px; }
+.arow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:14px; }
+.arow > span { flex:1 1 180px; overflow:hidden; text-overflow:ellipsis; }
+label.inline { display:flex; align-items:center; gap:6px; }
+label.inline input { width:90px; }
+input[type=checkbox] { width:18px; height:18px; accent-color:var(--primary-color); }
 .msg { margin:12px 16px 0; padding:8px 12px; border-radius:6px; background:var(--secondary-background-color); }
 `;
 

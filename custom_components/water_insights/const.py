@@ -13,6 +13,7 @@ CONF_MIN_VOLUME_L = "min_volume_l"
 CONF_HELPER_ENTITIES = "helper_entities"
 CONF_CONF_THRESHOLD = "conf_threshold"
 CONF_BACKFILL = "backfill"
+CONF_APPLIANCES = "appliances"  # [{entity_id, category, threshold}] for grouping draws per appliance run
 
 MODE_FLOW = "flow"
 MODE_COUNTER = "counter"

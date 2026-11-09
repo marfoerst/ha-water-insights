@@ -64,3 +64,14 @@ async def test_options_update_reloads(hass):
     await hass.async_block_till_done()
     assert entry.runtime_data.categories == ["Bad", "Küche"]
     assert hass.states.get("sensor.water_insights_water_flow_bad") is not None
+
+
+async def test_options_flow_keeps_appliance_rules(hass):
+    set_flow(hass, 0.1)
+    rule = {"entity_id": "sensor.washer_power", "category": "Waschmaschine", "threshold": 10.0}
+    entry = await setup_entry(hass, appliances=[rule])
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    opts = {k: v for k, v in SETTINGS.items() if k != "backfill"} | {"categories": ["Waschmaschine"]}
+    await hass.config_entries.options.async_configure(r["flow_id"], opts)
+    await hass.async_block_till_done()
+    assert entry.options["appliances"] == [rule]

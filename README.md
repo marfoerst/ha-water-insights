@@ -45,16 +45,33 @@ Open **Water Insights** in the sidebar:
 
 | Tab | What you do |
 |---|---|
-| **Classify** | Pick a category for open draws; confirm or correct automatic ones. Each row shows liters, duration and the flow curve. |
+| **Classify** | Pick a category for open draws; confirm or correct automatic ones. Each row shows liters, duration and the flow curve. Tick several draws to classify them in one go. |
 | **Usage** | Liters per category today / this week / this month / since install. |
 | **Model** | *Train model*, then see per category: labeled count, precision of automatic classification, share classified automatically, and a confusion matrix. |
-| **Settings** | Categories, thresholds, helper sensors, export/import. |
+| **Settings** | Categories, thresholds, helper sensors, appliance coupling, export/import. |
 
 After roughly two weeks of labeling, press **Train model**. A category is
 classified automatically only if it has at least **10** labeled draws and its
 automatic precision on held-out draws is at least **90 %**; individual draws
 additionally need a confidence of **0.8** (adjustable). Everything else stays open
 with a suggestion. Only draws *you* labeled or confirmed are used for training.
+
+### Appliance runs (washing machine, dishwasher)
+
+A washing machine fills several times per program, so one wash shows up as
+10–20 separate draws. Keep them separate – a toilet flush in between must not end
+up in the washing-machine total – but you don't have to classify them one by one:
+
+1. Add the appliance's power plug as a helper sensor.
+2. In **Settings → Appliances**, couple that helper to a category and set a
+   threshold (e.g. *Waschmaschine* from 10 W).
+3. On **Classify**, draws that happened while the appliance was running are
+   grouped into one card per run, e.g. *Waschmaschine ran 07:47–12:35 · 13 draws*.
+   Draws are pre-ticked unless the model is confident they are something else.
+   Untick what was something else and press *Classify ticked as Waschmaschine*.
+
+The coupling only groups and pre-selects – it never classifies by itself. Once
+the category has enough labels, the model takes over the fills automatically.
 
 ## Entities
 
@@ -131,6 +148,15 @@ in der Seitenleiste *Water Insights* Entnahmen einordnen → nach etwa zwei Woch
 wird eine Kategorie erst ab 10 eingeordneten Entnahmen und mindestens 90 %
 Präzision auf ungesehenen Entnahmen; unsichere oder ungewohnte Entnahmen bleiben
 offen. Korrekturen verschieben Liter zwischen den Sensoren. Alle Daten bleiben lokal.
+
+**Gerätelauf (Waschmaschine, Spülmaschine):** Eine Waschmaschine zieht pro
+Programm mehrmals Wasser, ein Waschgang erscheint also als 10–20 Entnahmen. Die
+bleiben einzeln, damit eine Toilettenspülung dazwischen nicht im
+Waschmaschinen-Topf landet. Koppelt man unter *Einstellungen → Gerätekopplung*
+den Leistungssensor der Maschine an die Kategorie (z. B. ab 10 W), fasst der Tab
+*Einordnen* jeden Lauf zu einer Karte zusammen. Man wählt ab, was etwas anderes
+war, und ordnet den Rest mit einem Klick ein. Mehrere Entnahmen lassen sich auch
+sonst per Häkchen gemeinsam einordnen.
 
 ## License
 

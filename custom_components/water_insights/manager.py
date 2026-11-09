@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .classifier import NoveltyGuard, guarded_confidence, model_from_dict
 from .const import (
+    CONF_APPLIANCES,
     CONF_BACKFILL,
     CONF_CATEGORIES,
     CONF_CONF_THRESHOLD,
@@ -51,6 +52,7 @@ from .const import (
 from .detector import EventDetector
 from .evaluation import TrainResult, predict_events, train_and_evaluate
 from .features import extract
+from .grouping import appliance_groups, assign_helpers, runs_from_series
 from .models import DetectorConfig, WaterEvent
 from .storage import State as StoredState
 from .storage import effective_label, event_status, export_events, merge_events, parse_events, state_from_dict, state_to_dict
@@ -73,6 +75,7 @@ def entry_options(entry: ConfigEntry) -> dict[str, Any]:
     o.setdefault(CONF_HELPER_ENTITIES, [])
     o.setdefault(CONF_CONF_THRESHOLD, DEFAULT_CONF_THRESHOLD)
     o.setdefault(CONF_BACKFILL, True)
+    o.setdefault(CONF_APPLIANCES, [])
     return o
 
 
@@ -114,6 +117,11 @@ def detect_history(
     return found
 
 
+def helper_series(states: list[State]) -> list[tuple[float, float]]:
+    """Recorded helper states as (timestamp, value) pairs (executor-safe)."""
+    return [(st.last_changed.timestamp(), _helper_value(st)) for st in states]
+
+
 def _helper_value(state: State | None) -> float:
     if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return math.nan
@@ -135,6 +143,7 @@ class WaterInsightsManager:
         self.mode: str = self.options[CONF_SOURCE_MODE]
         self.categories: list[str] = list(self.options[CONF_CATEGORIES])
         self.helpers: list[str] = list(self.options[CONF_HELPER_ENTITIES])
+        self.appliances: list[dict[str, Any]] = list(self.options[CONF_APPLIANCES])
         self.conf_threshold: float = float(self.options[CONF_CONF_THRESHOLD])
         self.detector_config = DetectorConfig(
             start_flow=float(self.options[CONF_START_FLOW]),
@@ -180,6 +189,10 @@ class WaterInsightsManager:
         if self.options[CONF_BACKFILL] and not self.state.backfill_done:
             self.entry.async_create_background_task(
                 self.hass, self.async_backfill(), f"{DOMAIN}_backfill"
+            )
+        elif self._events_missing_helpers():
+            self.entry.async_create_background_task(
+                self.hass, self.async_fill_helpers(), f"{DOMAIN}_fill_helpers"
             )
 
     async def async_stop(self) -> None:
@@ -441,6 +454,44 @@ class WaterInsightsManager:
         self._notify()
 
     @callback
+    def async_classify_many(self, event_ids: list[str], label: str) -> int:
+        """Set one user label on several draws; all ids are checked before anything changes."""
+        if label not in self.categories and label != LABEL_MIXED:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unknown_category",
+                translation_placeholders={"category": label},
+            )
+        evs = [self._get(eid) for eid in dict.fromkeys(event_ids)]
+        for ev in evs:
+            ev.label, ev.label_source = label, SOURCE_USER
+            self._fire_classified(ev)
+        self.state.model_stale = self.state.model is not None
+        self._notify()
+        return len(evs)
+
+    async def async_groups(self) -> list[dict[str, Any]]:
+        """Undecided draws grouped by appliance run (see grouping.appliance_groups).
+
+        Runs come from the appliance helper's recorded history when available.
+        """
+        undecided = [e for e in self.state.events.values() if e.label_source != SOURCE_USER]
+        rules = [r for r in self.appliances if r.get("category") in self.categories and r.get("entity_id")]
+        runs: dict[str, list[tuple[float, float]]] = {}
+        if undecided and rules:
+            oldest = max(min(e.start for e in undecided), time.time() - 30 * 86400)
+            now = time.time()
+            try:
+                series = await self._helper_history(oldest, now, [r["entity_id"] for r in rules])
+            except Exception:  # noqa: BLE001 - recorder unavailable: fall back to gap grouping
+                _LOGGER.debug("No helper history for appliance runs", exc_info=True)
+                series = {}
+            for r in rules:
+                if s := series.get(r["entity_id"]):
+                    runs[r["entity_id"]] = runs_from_series(s, float(r.get("threshold", 10.0)), until=now)
+        return appliance_groups(undecided, rules, self.categories, runs_by_entity=runs)
+
+    @callback
     def async_confirm(self, event_id: str) -> None:
         """Confirm the current (auto) label or the model suggestion."""
         ev = self._get(event_id)
@@ -513,6 +564,11 @@ class WaterInsightsManager:
         )
         if self._stopped:
             return 0
+        if found and self.helpers:
+            series = await self._helper_history(min(e.start for e in found), end.timestamp())
+            assign_helpers(found, series)
+        if self._stopped:
+            return 0
         known = {(round(e.start), round(e.volume_l)) for e in self.state.events.values()}
         n = 0
         for ev in found:
@@ -522,4 +578,51 @@ class WaterInsightsManager:
         self.state.backfill_done = True
         self._notify()
         _LOGGER.debug("Backfill found %s draws for %s", n, self.source)
+        return n
+
+    async def _helper_history(
+        self, start_ts: float, end_ts: float, entity_ids: list[str] | None = None
+    ) -> dict[str, list[tuple[float, float]]]:
+        """Recorded helper values between two timestamps, incl. the value in force at start."""
+        from homeassistant.components.recorder import get_instance, history  # noqa: PLC0415
+
+        start = dt_util.utc_from_timestamp(start_ts - 1)
+        end = dt_util.utc_from_timestamp(end_ts)
+        ids = list(dict.fromkeys(entity_ids if entity_ids is not None else self.helpers))
+
+        def job():
+            states = history.get_significant_states(
+                self.hass,
+                start,
+                end,
+                entity_ids=ids,
+                include_start_time_state=True,
+                significant_changes_only=False,
+                no_attributes=True,
+            )
+            return {h: helper_series(states.get(h, [])) for h in ids}
+
+        return await get_instance(self.hass).async_add_executor_job(job)
+
+    def _events_missing_helpers(self) -> list[WaterEvent]:
+        oldest = time.time() - 30 * 86400
+        return [
+            e
+            for e in self.state.events.values()
+            if e.start >= oldest and any(h not in e.helpers for h in self.helpers)
+        ]
+
+    async def async_fill_helpers(self) -> int:
+        """Add helper values that draws are missing (older backfills, helpers added later)."""
+        todo = self._events_missing_helpers()
+        if not todo:
+            return 0
+        series = await self._helper_history(min(e.start for e in todo), time.time())
+        if self._stopped:
+            return 0
+        n = assign_helpers(todo, series)
+        if n:
+            self.state.model_stale = self.state.model is not None
+            self._notify()
+        _LOGGER.debug("Filled helper values for %s draws of %s", n, self.source)
         return n
