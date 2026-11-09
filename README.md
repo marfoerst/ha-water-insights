@@ -67,7 +67,8 @@ up in the washing-machine total – but you don't have to classify them one by o
    threshold (e.g. *Waschmaschine* from 10 W).
 3. On **Classify**, draws that happened while the appliance was running are
    grouped into one card per run, e.g. *Waschmaschine ran 07:47–12:35 · 13 draws*.
-   Draws are pre-ticked unless the model is confident they are something else.
+   Before the first training every draw is pre-ticked; afterwards only draws the
+   model assigns to the appliance (at least 50 % confidence) are.
    Untick what was something else and press *Classify ticked as Waschmaschine*.
 
 The coupling only groups and pre-selects – it never classifies by itself. Once

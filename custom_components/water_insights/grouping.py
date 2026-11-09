@@ -12,7 +12,7 @@ from .models import WaterEvent
 DEFAULT_GROUP_GAP_S = 1800.0  # fallback without history: a pause between draws longer than this splits a run
 DEFAULT_RUN_MERGE_S = 900.0  # appliance below threshold for less than this still counts as the same run
 RUN_TOLERANCE_S = 120.0  # draws starting just outside a run (sensor lag) still belong to it
-PRESELECT_MAX_OTHER_CONF = 0.5  # a confident prediction for another category is left unticked
+PRESELECT_MIN_CONF = 0.5  # with a model, tick only draws it puts in the appliance's category at least this sure
 
 Series = list[tuple[float, float]]
 
@@ -89,11 +89,17 @@ def _valid_rules(rules: Iterable[dict[str, Any]], categories: list[str]) -> list
 
 
 def _preselect(ev: WaterEvent, category: str) -> bool:
+    """Tick a draw by default only if nothing speaks against the appliance.
+
+    Without a model every draw in the run is ticked. With a model, a draw is
+    ticked only when the model leans towards the appliance's category; an
+    unfamiliar pattern (confidence 0) or another category leaves it unticked.
+    """
     if ev.label == category:
         return True
-    if ev.prediction is None or ev.prediction == category:
+    if ev.prediction is None:
         return True
-    return (ev.confidence or 0.0) < PRESELECT_MAX_OTHER_CONF
+    return ev.prediction == category and (ev.confidence or 0.0) >= PRESELECT_MIN_CONF
 
 
 def appliance_groups(
@@ -112,7 +118,8 @@ def appliance_groups(
     history (`runs_by_entity`), a draw belongs to the run it started in instead –
     long pauses between fills (heating, main wash) then don't split a program.
     Draws the user already labeled are left out.
-    Each group lists all draws and the ones to tick by default; nothing is labeled here.
+    Each group lists all draws and the ones to tick by default (see _preselect);
+    nothing is labeled here.
     Groups are returned newest first.
     """
     candidates = sorted(

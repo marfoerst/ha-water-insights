@@ -61,12 +61,15 @@ def test_groups_skip_user_labels_and_preselect_by_prediction():
         ev(1, 0, power=60, prediction="Waschmaschine", confidence=0.9),
         ev(2, 300, power=60, label="Toilette", source="user"),  # already decided
         ev(3, 600, power=60, prediction="Toilette", confidence=0.95),  # model says toilet
-        ev(4, 900, power=60, prediction="Toilette", confidence=0.0),  # unfamiliar -> keep
+        ev(4, 900, power=60, prediction="Toilette", confidence=0.0),  # unfamiliar pattern: not ticked
         ev(5, 1200, power=60, label="Waschmaschine", source="auto", prediction="Waschmaschine", confidence=0.9),
+        ev(6, 1500, power=60, prediction="Waschmaschine", confidence=0.0),  # unfamiliar, even if nearest is WM
+        ev(7, 1800, power=60, prediction="Waschmaschine", confidence=0.6),
+        ev(8, 2100, power=60),  # no model yet: ticked
     ]
     (g,) = appliance_groups(events, [RULE], CATS)
-    assert g["event_ids"] == ["e1", "e3", "e4", "e5"]
-    assert g["preselected"] == ["e1", "e4", "e5"]
+    assert g["event_ids"] == ["e1", "e3", "e4", "e5", "e6", "e7", "e8"]
+    assert g["preselected"] == ["e1", "e5", "e7", "e8"]
 
 
 def test_groups_ignore_rules_for_unknown_categories_and_bad_rules():
