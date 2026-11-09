@@ -20,7 +20,7 @@ async def test_backfill_creates_open_events(hass, freezer):
     await async_wait_recording_done(hass)
     freezer.move_to(dt_util.utcnow() + timedelta(hours=2))
     entry = await setup_entry(hass, backfill=True)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     m = entry.runtime_data
     assert m.state.backfill_done
     evs = list(m.state.events.values())
@@ -46,7 +46,7 @@ async def test_backfill_records_helper_values(hass, freezer):
     await async_wait_recording_done(hass)
     freezer.move_to(dt_util.utcnow() + timedelta(hours=2))
     entry = await setup_entry(hass, backfill=True, helper_entities=[washer])
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     (ev,) = entry.runtime_data.state.events.values()
     assert ev.helpers == {washer: 45.0}
 
