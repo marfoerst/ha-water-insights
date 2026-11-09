@@ -44,6 +44,7 @@ SOURCE_AUTO = "auto"
 STATUS_OPEN = "open"
 STATUS_AUTO = "auto"
 STATUS_CONFIRMED = "confirmed"
+STATUS_SKIPPED = "skipped"
 
 EVENT_DETECTED = "water_insights_event_detected"
 EVENT_CLASSIFIED = "water_insights_event_classified"

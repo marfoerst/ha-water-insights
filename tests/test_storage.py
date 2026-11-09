@@ -102,3 +102,15 @@ def test_reserved_and_colliding_categories():
         "Spülmaschine",
         "Dusche",
     ]
+
+
+def test_reject_and_skip_fields_roundtrip_and_status():
+    from custom_components.water_insights.models import WaterEvent
+    from custom_components.water_insights.storage import event_status
+
+    e = WaterEvent(id="a", start=0, end=60, volume_l=5, duration_s=60, max_flow=6, rejected=["Toilette"], skipped=True)
+    back = WaterEvent.from_dict(e.to_dict())
+    assert back.rejected == ["Toilette"] and back.skipped
+    assert event_status(back) == "skipped"
+    old = WaterEvent.from_dict({"id": "b", "start": 0, "end": 1, "volume_l": 1, "duration_s": 1})
+    assert old.rejected == [] and not old.skipped and event_status(old) == "open"

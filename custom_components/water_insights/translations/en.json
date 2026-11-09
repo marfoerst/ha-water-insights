@@ -119,6 +119,9 @@
     },
     "invalid_settings": {
       "message": "Invalid settings: {error}"
+    },
+    "nothing_to_reject": {
+      "message": "Draw {event_id} has no automatic classification or suggestion to reject."
     }
   },
   "issues": {
@@ -149,6 +152,34 @@
     "confirm_event": {
       "name": "Confirm draw",
       "description": "Confirm the automatic classification or suggestion.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "Water Insights entry (optional with one sensor)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID of the draw."
+        }
+      }
+    },
+    "reject_event": {
+      "name": "Reject suggestion",
+      "description": "Reject the automatic classification or suggestion of a draw. It goes back to open and the category is not suggested for it again.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "Water Insights entry (optional with one sensor)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID of the draw."
+        }
+      }
+    },
+    "skip_event": {
+      "name": "Skip draw",
+      "description": "Set a draw aside: it leaves the queue, is not used for training and its liters count as unclassified. Classifying it later undoes this.",
       "fields": {
         "config_entry_id": {
           "name": "Entry",

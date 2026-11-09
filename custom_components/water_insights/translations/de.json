@@ -119,6 +119,9 @@
     },
     "invalid_settings": {
       "message": "Ungültige Einstellungen: {error}"
+    },
+    "nothing_to_reject": {
+      "message": "Entnahme {event_id} hat keine automatische Einordnung und keinen Vorschlag, der abgelehnt werden könnte."
     }
   },
   "issues": {
@@ -149,6 +152,34 @@
     "confirm_event": {
       "name": "Entnahme bestätigen",
       "description": "Bestätigt die automatische Einordnung bzw. den Vorschlag.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Water-Insights-Eintrag (bei einem Sensor optional)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID der Entnahme."
+        }
+      }
+    },
+    "reject_event": {
+      "name": "Vorschlag ablehnen",
+      "description": "Verwirft die automatische Einordnung oder den Vorschlag einer Entnahme. Sie ist wieder offen, und die Kategorie wird für sie nicht erneut vorgeschlagen.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Water-Insights-Eintrag (bei einem Sensor optional)."
+        },
+        "event_id": {
+          "name": "Event ID",
+          "description": "ID der Entnahme."
+        }
+      }
+    },
+    "skip_event": {
+      "name": "Entnahme überspringen",
+      "description": "Legt eine Entnahme beiseite: Sie verschwindet aus der Liste, wird nicht fürs Training genutzt, und ihre Liter zählen als nicht eingeordnet. Späteres Einordnen hebt das auf.",
       "fields": {
         "config_entry_id": {
           "name": "Eintrag",

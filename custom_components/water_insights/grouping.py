@@ -123,7 +123,7 @@ def appliance_groups(
     Groups are returned newest first.
     """
     candidates = sorted(
-        (e for e in events if e.label_source != SOURCE_USER), key=lambda e: e.start
+        (e for e in events if e.label_source != SOURCE_USER and not e.skipped), key=lambda e: e.start
     )
     groups: list[dict[str, Any]] = []
     for rule in _valid_rules(rules, categories):
@@ -144,15 +144,16 @@ def appliance_groups(
                     }
                 )
 
+        mine = [e for e in candidates if category not in e.rejected]
         known_runs = (runs_by_entity or {}).get(entity)
         if known_runs:
             for a, b in known_runs:
                 close(
-                    [e for e in candidates if a - RUN_TOLERANCE_S <= e.start <= b + RUN_TOLERANCE_S],
+                    [e for e in mine if a - RUN_TOLERANCE_S <= e.start <= b + RUN_TOLERANCE_S],
                     (a, b),
                 )
             continue
-        for ev in candidates:
+        for ev in mine:
             value = ev.helpers.get(entity)
             if value is None or math.isnan(value) or value < threshold:
                 continue

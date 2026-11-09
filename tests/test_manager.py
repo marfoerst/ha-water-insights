@@ -1,6 +1,9 @@
 """Manager behaviour inside Home Assistant."""
 from __future__ import annotations
 
+import pytest
+
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
 
 from custom_components.water_insights.const import EVENT_DETECTED
@@ -130,3 +133,57 @@ async def test_unsupported_unit_ignored(hass, freezer):
     set_flow(hass, 0.0)
     await hass.async_block_till_done()
     assert entry.runtime_data.state.integral_l < 0.1
+
+
+async def test_reject_auto_label_and_never_reapply(hass, freezer):
+    entry = await setup_entry(hass)
+    m = entry.runtime_data
+    trained_state(m)
+    await simulate_shower(hass, freezer)
+    ev = next(iter(m.state.events.values()))
+    assert ev.label == "Dusche" and ev.label_source == "auto"
+    m.async_reject([ev.id])
+    assert ev.label is None and ev.prediction is None and ev.rejected == ["Dusche"]
+    assert m.events("open")[0].id == ev.id
+    assert m.totals()["Dusche"] == 0 and m.totals()["unclassified"] > 50
+    # retraining/re-scoring must not bring the rejected category back
+    m._predict(ev)
+    assert ev.label is None and ev.prediction is None
+
+
+async def test_reject_open_suggestion(hass, freezer):
+    entry = await setup_entry(hass, conf_threshold=0.99)
+    m = entry.runtime_data
+    trained_state(m)
+    await simulate_shower(hass, freezer, flow=6.0, seconds=60)
+    ev = next(iter(m.state.events.values()))
+    assert ev.label is None and ev.prediction is not None
+    sugg = ev.prediction
+    m.async_reject([ev.id])
+    assert ev.prediction is None and ev.rejected == [sugg]
+
+
+async def test_reject_user_label_raises(hass, freezer):
+    entry = await setup_entry(hass)
+    m = entry.runtime_data
+    await simulate_shower(hass, freezer)
+    eid = next(iter(m.state.events))
+    m.async_classify(eid, "Dusche")
+    with pytest.raises(ServiceValidationError):
+        m.async_reject([eid])
+
+
+async def test_skip_and_undo_by_classifying(hass, freezer):
+    entry = await setup_entry(hass)
+    m = entry.runtime_data
+    trained_state(m)
+    await simulate_shower(hass, freezer)
+    ev = next(iter(m.state.events.values()))
+    m.async_skip([ev.id])
+    assert ev.skipped and ev.label is None
+    assert m.events("open") == [] and m.events("skipped")[0].id == ev.id
+    assert m.totals()["unclassified"] > 50  # liters stay visible as unclassified
+    m._predict(ev)
+    assert ev.label is None  # a skipped draw is never auto-labeled again
+    m.async_classify(ev.id, "Dusche")
+    assert not ev.skipped and ev.label == "Dusche"

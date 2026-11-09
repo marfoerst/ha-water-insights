@@ -39,6 +39,8 @@ class WaterEvent:
     prediction: str | None = None
     confidence: float | None = None
     booked: bool = False  # liters counted on the category sensors (live draws only)
+    rejected: list[str] = field(default_factory=list)  # categories the user said this draw is not
+    skipped: bool = False  # user set it aside: out of the queue and out of training
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dict."""
@@ -63,4 +65,6 @@ class WaterEvent:
             prediction=data.get("prediction"),
             confidence=data.get("confidence"),
             booked=bool(data.get("booked", False)),
+            rejected=[str(x) for x in data.get("rejected") or []],
+            skipped=bool(data.get("skipped", False)),
         )

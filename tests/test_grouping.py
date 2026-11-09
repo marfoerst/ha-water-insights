@@ -99,3 +99,12 @@ def test_groups_use_appliance_runs_when_history_known():
         (19_000, 21_000, ["e4", "e5"]),
         (900, 8000, ["e1", "e2", "e3"]),
     ]
+
+
+def test_groups_leave_out_skipped_and_rejected_draws():
+    e2 = ev(2, 300, power=60)
+    e2.skipped = True
+    e3 = ev(3, 600, power=60)
+    e3.rejected = ["Waschmaschine"]
+    (g,) = appliance_groups([ev(1, 0, power=60), e2, e3, ev(4, 900, power=60)], [RULE], CATS)
+    assert g["event_ids"] == ["e1", "e4"]

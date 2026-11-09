@@ -195,3 +195,27 @@ async def test_panel_survives_reload_and_goes_with_last_entry(hass):
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert "water-insights" not in hass.data["frontend_panels"]
+
+
+async def test_ws_and_services_reject_skip(hass, hass_ws_client):
+    entry = await setup_entry(hass)
+    m = entry.runtime_data
+    ids = _inject(m, 3, 60.0)
+    m.state.events[ids[0]].prediction = "Toilette"
+    m.state.events[ids[0]].confidence = 0.7
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "water_insights/reject", "entry_id": entry.entry_id, "event_ids": [ids[0]]})
+    assert (await ws.receive_json())["success"]
+    assert m.state.events[ids[0]].rejected == ["Toilette"]
+    await ws.send_json({"id": 2, "type": "water_insights/skip", "entry_id": entry.entry_id, "event_ids": ids[1:]})
+    assert (await ws.receive_json())["success"]
+    await ws.send_json({"id": 3, "type": "water_insights/list"})
+    assert (await ws.receive_json())["result"]["entries"][0]["counts"]["skipped"] == 2
+    await ws.send_json({"id": 4, "type": "water_insights/events", "entry_id": entry.entry_id, "status": "skipped"})
+    assert len((await ws.receive_json())["result"]["events"]) == 2
+    await hass.services.async_call(DOMAIN, "classify_event", {"event_id": ids[1], "category": "Toilette"}, blocking=True)
+    assert not m.state.events[ids[1]].skipped
+    await hass.services.async_call(DOMAIN, "skip_event", {"event_id": ids[1]}, blocking=True)
+    assert m.state.events[ids[1]].skipped and m.state.events[ids[1]].label is None
+    with pytest.raises(ServiceValidationError):  # nothing to reject on a draw without suggestion
+        await hass.services.async_call(DOMAIN, "reject_event", {"event_id": ids[2]}, blocking=True)

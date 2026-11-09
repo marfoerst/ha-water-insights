@@ -78,7 +78,7 @@ def _entry_info(m) -> dict[str, Any]:
         "settings": {k: m.options.get(k) for k in SETTING_KEYS},
         "counts": {
             s: sum(1 for e in m.state.events.values() if event_status(e) == s)
-            for s in ("open", "auto", "confirmed")
+            for s in ("open", "auto", "confirmed", "skipped")
         },
     }
 
@@ -116,7 +116,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         {
             vol.Required("type"): f"{DOMAIN}/events",
             vol.Required("entry_id"): str,
-            vol.Optional("status"): vol.In(["open", "auto", "confirmed"]),
+            vol.Optional("status"): vol.In(["open", "auto", "confirmed", "skipped"]),
             vol.Optional("limit", default=200): vol.All(int, vol.Range(1, 2000)),
         }
     )
@@ -156,6 +156,29 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
     def ws_classify_many(hass, msg):
         n = resolve(hass, msg["entry_id"]).async_classify_many(msg["event_ids"], msg["category"])
         return {"classified": n}
+
+    def _ids_command(name):
+        return websocket_api.websocket_command(
+            {
+                vol.Required("type"): f"{DOMAIN}/{name}",
+                vol.Required("entry_id"): str,
+                vol.Required("event_ids"): vol.All([str], vol.Length(min=1, max=1000)),
+            }
+        )
+
+    @_ids_command("reject")
+    @websocket_api.require_admin
+    @websocket_api.async_response
+    @_wrap
+    def ws_reject(hass, msg):
+        return {"rejected": resolve(hass, msg["entry_id"]).async_reject(msg["event_ids"])}
+
+    @_ids_command("skip")
+    @websocket_api.require_admin
+    @websocket_api.async_response
+    @_wrap
+    def ws_skip(hass, msg):
+        return {"skipped": resolve(hass, msg["entry_id"]).async_skip(msg["event_ids"])}
 
     @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/groups", vol.Required("entry_id"): str})
     @websocket_api.require_admin
@@ -214,5 +237,16 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         hass.config_entries.async_update_entry(m.entry, options={**m.entry.options, **new})
         return {}
 
-    for cmd in (ws_list, ws_events, ws_classify, ws_classify_many, ws_groups, ws_confirm, ws_train, ws_update):
+    for cmd in (
+        ws_list,
+        ws_events,
+        ws_classify,
+        ws_classify_many,
+        ws_reject,
+        ws_skip,
+        ws_groups,
+        ws_confirm,
+        ws_train,
+        ws_update,
+    ):
         websocket_api.async_register_command(hass, cmd)

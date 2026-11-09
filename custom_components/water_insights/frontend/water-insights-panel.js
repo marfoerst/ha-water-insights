@@ -23,6 +23,9 @@ const I18N = {
     applyGroup: "Classify ticked as", others: "Other draws", selected: "selected", apply: "Classify",
     appliances: "Appliances", appliancesHint: "Couple a helper sensor to a category. Draws while its value is at or above the threshold are grouped as one appliance run on the Classify tab. Nothing is classified automatically by this.",
     noAppliance: "– no appliance –", threshold: "from value", noHelpers: "Add helper sensors above and save first.",
+    reject: "Reject", rejectTitle: "The suggestion is wrong – the draw stays open and this category is not suggested again",
+    skip: "Skip", skipTitle: "Set aside – leaves the list, not used for training, liters count as unclassified",
+    showSkipped: "Show skipped draws", hideSkipped: "Hide skipped draws", skippedBadge: "Skipped",
   },
   de: {
     title: "Water Insights", classify: "Einordnen", usage: "Verbrauch", model: "Modell", settings: "Einstellungen",
@@ -47,6 +50,9 @@ const I18N = {
     applyGroup: "Ausgewählte einordnen als", others: "Weitere Entnahmen", selected: "ausgewählt", apply: "Einordnen",
     appliances: "Gerätekopplung", appliancesHint: "Koppelt einen Hilfssensor an eine Kategorie. Entnahmen, während sein Wert die Schwelle erreicht, werden im Tab Einordnen als ein Gerätelauf gruppiert. Automatisch eingeordnet wird dadurch nichts.",
     noAppliance: "– kein Gerät –", threshold: "ab Wert", noHelpers: "Zuerst oben Hilfssensoren eintragen und speichern.",
+    reject: "Ablehnen", rejectTitle: "Der Vorschlag stimmt nicht – die Entnahme bleibt offen, diese Kategorie wird nicht wieder vorgeschlagen",
+    skip: "Überspringen", skipTitle: "Beiseitelegen – verschwindet aus der Liste, zählt nicht fürs Training, Liter zählen als nicht eingeordnet",
+    showSkipped: "Übersprungene anzeigen", hideSkipped: "Übersprungene ausblenden", skippedBadge: "Übersprungen",
   },
 };
 
@@ -64,6 +70,13 @@ class WaterInsightsPanel extends HTMLElement {
     this._groups = [];
     this._sel = new Set(); // ticked draws in the plain list
     this._gtoggle = new Map(); // draw id -> ticked state overriding a group's preselection
+    this._showSkipped = false;
+    this._skipped = [];
+    try {
+      this._dismissed = new Set(JSON.parse(localStorage.getItem("water-insights-dismissed-runs") || "[]"));
+    } catch (e) {
+      this._dismissed = new Set(); // appliance runs already handled: their leftovers go to the plain list
+    }
     this._busy = false;
     this._msg = "";
     this._loaded = false;
@@ -119,8 +132,11 @@ class WaterInsightsPanel extends HTMLElement {
           ),
           this._hass.callWS({ type: "water_insights/groups", entry_id: this._entryId }),
         ]);
+        this._skipped = this._showSkipped
+          ? (await this._hass.callWS({ type: "water_insights/events", entry_id: this._entryId, status: "skipped", limit: 300 })).events
+          : [];
         this._events = [...open.events, ...auto.events].sort((a, b) => b.start - a.start);
-        this._groups = groups.groups;
+        this._groups = groups.groups.filter((g) => !this._dismissed.has(this._runKey(g)));
         const ids = new Set(this._events.map((e) => e.id));
         this._sel = new Set([...this._sel].filter((id) => ids.has(id)));
         this._gtoggle = new Map([...this._gtoggle].filter(([id]) => ids.has(id)));
@@ -186,15 +202,33 @@ class WaterInsightsPanel extends HTMLElement {
     return `<svg viewBox="0 0 ${w} ${h}" class="spark" aria-hidden="true"><polyline points="${pts}"/></svg>`;
   }
 
+  _runKey(g) {
+    return `${g.entity_id}|${Math.round(g.start)}`;
+  }
+
+  _dismiss(g) {
+    this._dismissed.add(this._runKey(g));
+    try {
+      localStorage.setItem("water-insights-dismissed-runs", JSON.stringify([...this._dismissed].slice(-200)));
+    } catch (e) {
+      /* storage unavailable: dismissal lasts for this page view */
+    }
+  }
+
   _groupChecked(g, id) {
     return this._gtoggle.has(id) ? this._gtoggle.get(id) : g.preselected.includes(id);
   }
 
   _classify() {
     const t = this.t;
-    if (!this._events.length) return `<p class="muted">${t.none}</p>`;
     const cats = [...this.entry.categories, "mixed"];
     const fmt = new Intl.DateTimeFormat(this._hass.language, { dateStyle: "short", timeStyle: "short" });
+    const nSkipped = this.entry.counts?.skipped || 0;
+    const skippedToggle = nSkipped
+      ? `<p><button class="link" id="toggleSkipped">${this._showSkipped ? t.hideSkipped : t.showSkipped} (${nSkipped})</button></p>`
+      : "";
+    const skippedHtml = this._showSkipped ? this._skipped.map((e) => this._row(e, cats, fmt)).join("") : "";
+    if (!this._events.length) return `<p class="muted">${t.none}</p>${skippedToggle}${skippedHtml}`;
     const tfmt = new Intl.DateTimeFormat(this._hass.language, { timeStyle: "short" });
     const byId = new Map(this._events.map((e) => [e.id, e]));
     const grouped = new Set(this._groups.flatMap((g) => g.event_ids));
@@ -229,36 +263,47 @@ class WaterInsightsPanel extends HTMLElement {
           <select id="bulkcat" aria-label="${t.category}"><option value="">${t.choose}</option>${cats
             .map((c) => `<option value="${esc(c)}">${esc(this.label(c))}</option>`)
             .join("")}</select>
-          <button id="bulkapply" ${this._busy ? "disabled" : ""}>${t.apply}</button></div>`
+          <button id="bulkapply" ${this._busy ? "disabled" : ""}>${t.apply}</button>
+          <button class="ghost" id="bulkskip" title="${esc(t.skipTitle)}" ${this._busy ? "disabled" : ""}>${t.skip}</button></div>`
       : "";
     const head = groupsHtml && rest.length ? `<h3>${t.others}</h3>` : "";
-    return groupsHtml + head + bulk + rest
-      .map((e) => {
-        const options = [`<option value="">${t.choose}</option>`]
-          .concat(cats.map((c) => `<option value="${esc(c)}" ${e.label === c ? "selected" : ""}>${esc(this.label(c))}</option>`))
-          .join("");
-        const sugg = !e.prediction
-          ? ""
-          : e.confidence === 0
-          ? t.unfamiliar
-          : `${t.suggestion}: <b>${esc(this.label(e.prediction))}</b> · ${t.confidence} ${pct(e.confidence)}`;
-        const badge = e.status === "auto" ? `<span class="badge">${t.auto}</span>` : `<span class="badge open">${t.open}</span>`;
-        const canConfirm = e.status === "auto";
-        return `<div class="card row">
-          <input type="checkbox" data-sel="${esc(e.id)}" ${this._sel.has(e.id) ? "checked" : ""} aria-label="${t.selected}">
-          <div class="meta">
-            <div><b>${fmt.format(new Date(e.start * 1000))}</b> ${badge}</div>
-            <div>${e.volume_l.toFixed(1)} ${t.liters} · ${(e.duration_s / 60).toFixed(1)} ${t.min} · max ${e.max_flow.toFixed(1)} L/min</div>
-            <div class="muted">${sugg}</div>
-          </div>
-          ${this._spark(e.samples)}
-          <div class="actions">
-            <select data-classify="${esc(e.id)}" aria-label="${t.category}">${options}</select>
-            ${canConfirm ? `<button data-confirm="${esc(e.id)}" ${this._busy ? "disabled" : ""}>${t.confirm}</button>` : ""}
-          </div>
-        </div>`;
-      })
+    return groupsHtml + head + bulk + rest.map((e) => this._row(e, cats, fmt)).join("") + skippedToggle + skippedHtml;
+  }
+
+  _row(e, cats, fmt) {
+    const t = this.t;
+    const options = [`<option value="">${t.choose}</option>`]
+      .concat(cats.map((c) => `<option value="${esc(c)}" ${e.label === c ? "selected" : ""}>${esc(this.label(c))}</option>`))
       .join("");
+    const sugg = !e.prediction
+      ? ""
+      : e.confidence === 0
+      ? t.unfamiliar
+      : `${t.suggestion}: <b>${esc(this.label(e.prediction))}</b> · ${t.confidence} ${pct(e.confidence)}`;
+    const badge =
+      e.status === "auto" ? `<span class="badge">${t.auto}</span>`
+      : e.status === "skipped" ? `<span class="badge open">${t.skippedBadge}</span>`
+      : `<span class="badge open">${t.open}</span>`;
+    const dis = this._busy ? "disabled" : "";
+    const canConfirm = e.status === "auto";
+    const canReject = e.status === "auto" || (e.status === "open" && e.prediction && e.confidence > 0);
+    const canSkip = e.status === "open" || e.status === "auto";
+    const sel = e.status === "skipped" ? "" : `<input type="checkbox" data-sel="${esc(e.id)}" ${this._sel.has(e.id) ? "checked" : ""} aria-label="${t.selected}">`;
+    return `<div class="card row">
+      ${sel}
+      <div class="meta">
+        <div><b>${fmt.format(new Date(e.start * 1000))}</b> ${badge}</div>
+        <div>${e.volume_l.toFixed(1)} ${t.liters} · ${(e.duration_s / 60).toFixed(1)} ${t.min} · max ${e.max_flow.toFixed(1)} L/min</div>
+        <div class="muted">${sugg}</div>
+      </div>
+      ${this._spark(e.samples)}
+      <div class="actions">
+        <select data-classify="${esc(e.id)}" aria-label="${t.category}">${options}</select>
+        ${canConfirm ? `<button data-confirm="${esc(e.id)}" ${dis}>${t.confirm}</button>` : ""}
+        ${canReject ? `<button class="ghost" data-reject="${esc(e.id)}" title="${esc(t.rejectTitle)}" ${dis}>✕ ${t.reject}</button>` : ""}
+        ${canSkip ? `<button class="ghost" data-skip="${esc(e.id)}" title="${esc(t.skipTitle)}" ${dis}>${t.skip}</button>` : ""}
+      </div>
+    </div>`;
   }
 
   _usage() {
@@ -389,6 +434,24 @@ class WaterInsightsPanel extends HTMLElement {
       this._sel.clear();
       await this._ws({ type: "water_insights/classify_many", event_ids: ids, category: cat });
     });
+    root.getElementById("bulkskip")?.addEventListener("click", async () => {
+      const ids = [...this._sel];
+      this._sel.clear();
+      await this._ws({ type: "water_insights/skip", event_ids: ids });
+    });
+    root.querySelectorAll("[data-reject]").forEach((b) =>
+      b.addEventListener("click", () => this._ws({ type: "water_insights/reject", event_ids: [b.dataset.reject] }))
+    );
+    root.querySelectorAll("[data-skip]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._sel.delete(b.dataset.skip);
+        this._ws({ type: "water_insights/skip", event_ids: [b.dataset.skip] });
+      })
+    );
+    root.getElementById("toggleSkipped")?.addEventListener("click", () => {
+      this._showSkipped = !this._showSkipped;
+      this._refresh();
+    });
     root.querySelectorAll("[data-gtick]").forEach((cb) =>
       cb.addEventListener("change", () => {
         this._gtoggle.set(cb.dataset.gtick, cb.checked);
@@ -401,6 +464,7 @@ class WaterInsightsPanel extends HTMLElement {
         const ids = g.event_ids.filter((id) => this._groupChecked(g, id));
         if (!ids.length) return;
         g.event_ids.forEach((id) => this._gtoggle.delete(id));
+        this._dismiss(g);
         await this._ws({ type: "water_insights/classify_many", event_ids: ids, category: g.category });
       })
     );
@@ -522,6 +586,8 @@ legend { padding:0 4px; font-size:14px; }
 .arow > span { flex:1 1 180px; overflow:hidden; text-overflow:ellipsis; }
 label.inline { display:flex; align-items:center; gap:6px; }
 label.inline input { width:90px; }
+button.ghost { background:none; color:var(--primary-color); border:1px solid var(--divider-color); }
+button.link { background:none; color:var(--primary-color); padding:4px 0; }
 input[type=checkbox] { width:18px; height:18px; accent-color:var(--primary-color); }
 .msg { margin:12px 16px 0; padding:8px 12px; border-radius:6px; background:var(--secondary-background-color); }
 `;

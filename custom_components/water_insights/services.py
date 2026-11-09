@@ -79,6 +79,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
         eid = call.data[ATTR_EVENT]
         resolve(hass, call.data.get(ATTR_ENTRY), eid).async_confirm(eid)
 
+    async def reject(call: ServiceCall) -> None:
+        eid = call.data[ATTR_EVENT]
+        resolve(hass, call.data.get(ATTR_ENTRY), eid).async_reject([eid])
+
+    async def skip(call: ServiceCall) -> None:
+        eid = call.data[ATTR_EVENT]
+        resolve(hass, call.data.get(ATTR_ENTRY), eid).async_skip([eid])
+
     async def train(call: ServiceCall) -> ServiceResponse:
         result = await resolve(hass, call.data.get(ATTR_ENTRY)).async_train()
         return train_summary(result)
@@ -118,6 +126,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, "confirm_event", confirm, vol.Schema({entry: cv.string, vol.Required(ATTR_EVENT): cv.string})
     )
+    for name, handler in (("reject_event", reject), ("skip_event", skip)):
+        hass.services.async_register(
+            DOMAIN, name, handler, vol.Schema({entry: cv.string, vol.Required(ATTR_EVENT): cv.string})
+        )
     hass.services.async_register(
         DOMAIN, "train_model", train, vol.Schema({entry: cv.string}), supports_response=SupportsResponse.OPTIONAL
     )

@@ -45,7 +45,7 @@ Open **Water Insights** in the sidebar:
 
 | Tab | What you do |
 |---|---|
-| **Classify** | Pick a category for open draws; confirm or correct automatic ones. Each row shows liters, duration and the flow curve. Tick several draws to classify them in one go. |
+| **Classify** | Pick a category for open draws; confirm or correct automatic ones. Each row shows liters, duration and the flow curve. Tick several draws to classify them in one go. **✕ Reject** discards a wrong suggestion or automatic classification (the draw stays open, that category is not suggested for it again); **Skip** sets a draw you can't identify aside (out of the list and out of training, liters count as unclassified; classifying it later undoes this). |
 | **Usage** | Liters per category today / this week / this month / since install. |
 | **Model** | *Train model*, then see per category: labeled count, precision of automatic classification, share classified automatically, and a confusion matrix. |
 | **Settings** | Categories, thresholds, helper sensors, appliance coupling, export/import. |
@@ -93,9 +93,9 @@ metrics as attributes) and **Last trained**.
 | Event | Data |
 |---|---|
 | `water_insights_event_detected` | `entry_id, event_id, start, end, volume_l, duration_s, prediction, confidence, label, status` (`open`/`auto`) |
-| `water_insights_event_classified` | same, after labeling/confirming |
+| `water_insights_event_classified` | same, after labeling/confirming/rejecting/skipping (`status` also `confirmed`/`skipped`) |
 
-Services: `water_insights.classify_event`, `confirm_event`, `train_model`
+Services: `water_insights.classify_event`, `confirm_event`, `reject_event`, `skip_event`, `train_model`
 (returns a summary), `export_events`, `import_events` (export JSON or legacy JSONL).
 
 The integration sends **no notifications** itself. A ready-made blueprint asks you
@@ -158,6 +158,13 @@ den Leistungssensor der Maschine an die Kategorie (z. B. ab 10 W), fasst der Tab
 *Einordnen* jeden Lauf zu einer Karte zusammen. Man wählt ab, was etwas anderes
 war, und ordnet den Rest mit einem Klick ein. Mehrere Entnahmen lassen sich auch
 sonst per Häkchen gemeinsam einordnen.
+
+**Vorschlag passt nicht?** *✕ Ablehnen* verwirft einen falschen Vorschlag oder eine
+automatische Einordnung – die Entnahme bleibt offen, die Kategorie wird für sie
+nicht wieder vorgeschlagen. *Überspringen* legt Entnahmen beiseite, die man nicht
+zuordnen kann: Sie verschwinden aus der Liste, fließen nicht ins Training ein und
+zählen als *Nicht eingeordnet*. Über *Übersprungene anzeigen* lassen sie sich
+später doch noch einordnen.
 
 ## License
 

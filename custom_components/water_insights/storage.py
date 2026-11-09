@@ -6,7 +6,15 @@ from datetime import datetime
 import json
 from typing import Any
 
-from .const import LABEL_MIXED, LABEL_UNCLASSIFIED, SOURCE_USER, STATUS_AUTO, STATUS_CONFIRMED, STATUS_OPEN
+from .const import (
+    LABEL_MIXED,
+    LABEL_UNCLASSIFIED,
+    SOURCE_USER,
+    STATUS_AUTO,
+    STATUS_CONFIRMED,
+    STATUS_OPEN,
+    STATUS_SKIPPED,
+)
 from .models import WaterEvent
 
 EXPORT_VERSION = 1
@@ -55,7 +63,9 @@ def state_from_dict(data: dict[str, Any] | None) -> State:
 
 
 def event_status(event: WaterEvent) -> str:
-    """open / auto / confirmed."""
+    """open / auto / confirmed / skipped."""
+    if event.skipped:
+        return STATUS_SKIPPED
     if event.label is None:
         return STATUS_OPEN
     return STATUS_CONFIRMED if event.label_source == SOURCE_USER else STATUS_AUTO

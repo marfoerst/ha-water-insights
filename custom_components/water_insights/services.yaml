@@ -22,6 +22,26 @@ confirm_event:
       required: true
       selector:
         text:
+reject_event:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: water_insights
+    event_id:
+      required: true
+      selector:
+        text:
+skip_event:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: water_insights
+    event_id:
+      required: true
+      selector:
+        text:
 train_model:
   fields:
     config_entry_id:

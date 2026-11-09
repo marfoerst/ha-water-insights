@@ -370,7 +370,7 @@ class WaterInsightsManager:
 
     def _predict(self, ev: WaterEvent) -> None:
         mg = self._model()
-        if mg is None:
+        if mg is None or ev.skipped:
             return
         model, guard = mg
         X = extract(ev, self.state.model.get("helper_ids", []), dt_util.get_default_time_zone())
@@ -380,6 +380,9 @@ class WaterInsightsManager:
             return
         ev.prediction = model.classes[int(idx[0])]
         ev.confidence = float(conf[0])
+        if ev.prediction in ev.rejected:
+            ev.prediction, ev.confidence = None, None
+            return
         allowed = (set(self.categories) | {LABEL_MIXED}) & self._enabled
         if ev.label is None and ev.prediction in allowed and ev.confidence >= self.conf_threshold:
             ev.label = ev.prediction
@@ -448,7 +451,7 @@ class WaterInsightsManager:
                 translation_placeholders={"category": label},
             )
         ev = self._get(event_id)
-        ev.label, ev.label_source = label, SOURCE_USER
+        ev.label, ev.label_source, ev.skipped = label, SOURCE_USER, False
         self.state.model_stale = self.state.model is not None
         self._fire_classified(ev)
         self._notify()
@@ -464,7 +467,7 @@ class WaterInsightsManager:
             )
         evs = [self._get(eid) for eid in dict.fromkeys(event_ids)]
         for ev in evs:
-            ev.label, ev.label_source = label, SOURCE_USER
+            ev.label, ev.label_source, ev.skipped = label, SOURCE_USER, False
             self._fire_classified(ev)
         self.state.model_stale = self.state.model is not None
         self._notify()
@@ -490,6 +493,44 @@ class WaterInsightsManager:
                 if s := series.get(r["entity_id"]):
                     runs[r["entity_id"]] = runs_from_series(s, float(r.get("threshold", 10.0)), until=now)
         return appliance_groups(undecided, rules, self.categories, runs_by_entity=runs)
+
+    @callback
+    def async_reject(self, event_ids: list[str]) -> int:
+        """Reject the automatic label or the suggestion of draws; they go back to open.
+
+        The rejected category is remembered and never suggested for these draws again.
+        All ids are checked before anything changes.
+        """
+        evs = [self._get(eid) for eid in dict.fromkeys(event_ids)]
+        for ev in evs:
+            if ev.label_source == SOURCE_USER or (ev.label is None and ev.prediction is None):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="nothing_to_reject",
+                    translation_placeholders={"event_id": ev.id},
+                )
+        for ev in evs:
+            target = ev.label or ev.prediction
+            if target not in ev.rejected:
+                ev.rejected.append(target)
+            ev.label, ev.label_source = None, None
+            ev.prediction, ev.confidence = None, None
+            self._fire_classified(ev)
+        self._notify()
+        return len(evs)
+
+    @callback
+    def async_skip(self, event_ids: list[str]) -> int:
+        """Set draws aside: out of the queue and out of training, liters count as unclassified."""
+        evs = [self._get(eid) for eid in dict.fromkeys(event_ids)]
+        for ev in evs:
+            if ev.label_source == SOURCE_USER:
+                self.state.model_stale = self.state.model is not None
+            ev.skipped = True
+            ev.label, ev.label_source = None, None
+            self._fire_classified(ev)
+        self._notify()
+        return len(evs)
 
     @callback
     def async_confirm(self, event_id: str) -> None:
@@ -527,8 +568,10 @@ class WaterInsightsManager:
             allowed = (set(self.categories) | {LABEL_MIXED}) & self._enabled
             for eid, (pred, conf) in preds.items():
                 ev = self.state.events.get(eid)
-                if ev is None or ev.label_source == SOURCE_USER:
+                if ev is None or ev.label_source == SOURCE_USER or ev.skipped:
                     continue
+                if pred in ev.rejected:
+                    pred, conf = None, None
                 ev.prediction, ev.confidence = pred, conf
                 if pred in allowed and conf >= self.conf_threshold:
                     ev.label, ev.label_source = pred, SOURCE_AUTO
